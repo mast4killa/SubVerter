@@ -205,3 +205,16 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- SubVerter project-specific ignores ---
+
+# Temporary extracted subtitles from MKV
+*.tmp.srt
+*.extracted.srt
+
+# Backup or intermediate files
+*.bak
+*.tmp
+
+# Output folder for translated subtitles
+/output/
