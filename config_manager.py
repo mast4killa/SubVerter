@@ -12,7 +12,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "mkvmerge_path": Path("C:/Program Files/MKVToolNix/mkvmerge.exe"),
     "model": "mistral",
     "char_limit": 2500,
-    "source_language_priority": ["en", "fr", "de", "es", "it"],
+    "allowed_src_langs_ordered": ["en", "fr", "de", "es", "it"],
 }
 
 
@@ -60,7 +60,7 @@ def normalise_paths(cfg: dict[str, Any]) -> dict[str, Any]:
     """
     Convert any path strings in cfg to Path objects for consistency.
     """
-    for key in ("ollama_path", "mkvextract_path"):
+    for key in ("ollama_path", "mkvextract_path", "mkvmerge_path"):
         if key in cfg and isinstance(cfg[key], str):
             cfg[key] = Path(cfg[key])
     return cfg
@@ -117,7 +117,7 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
 
     # --- Tool path checks ---
     print("      🛠️ Tool paths:")
-    for tool_key in ("ollama_path", "mkvextract_path"):
+    for tool_key in ("ollama_path", "mkvextract_path", "mkvmerge_path"):
         path = cfg.get(tool_key)
         if isinstance(path, str):
             path = Path(path)
@@ -142,9 +142,9 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
     if not is_valid_language_code(cfg.get("target_language", "")):
         print(f"         ⚠️ Invalid target_language: {cfg.get('target_language')}")
         ok = False
-    for lang in cfg.get("source_language_priority", []):
+    for lang in cfg.get("allowed_src_langs_ordered", []):
         if not is_valid_language_code(lang):
-            print(f"         ⚠️ Invalid source_language_priority entry: {lang}")
+            print(f"         ⚠️ Invalid allowed_src_langs_ordered entry: {lang}")
             ok = False
 
     # --- Save only if updated ---
