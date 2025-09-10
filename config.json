@@ -1,0 +1,15 @@
+{
+  "_note": "Language codes follow ISO 639-1 or 639-2. See: https://codeberg.org/mbunkus/mkvtoolnix/wiki/Languages-in-Matroska-and-MKVToolNix",
+  "target_language": "nl",
+  "ollama_path": "C:\\Users\\m4st4\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+  "mkvextract_path": "C:\\Program Files\\MKVToolNix\\mkvextract.exe",
+  "model": "mistral",
+  "char_limit": 2500,
+  "source_language_priority": [
+    "en",
+    "fr",
+    "de",
+    "es",
+    "it"
+  ]
+}
