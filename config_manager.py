@@ -10,19 +10,13 @@ Handles:
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
+from lang_utils import normalize_lang_code
 
 # Path to the configuration file (stored alongside this script)
 CONFIG_PATH: Path = Path(__file__).with_name("config.json")
 
-# Mapping of common ISO 639-2 codes to ISO 639-1 equivalents
-ISO639_MAP: dict[str, str] = {
-    "eng": "en", "fra": "fr", "fre": "fr", "deu": "de", "ger": "de", "spa": "es",
-    "ita": "it", "nld": "nl", "dut": "nl", "por": "pt", "rus": "ru", "jpn": "ja",
-    "zho": "zh", "chi": "zh", "ara": "ar", "tur": "tr", "pol": "pl", "swe": "sv",
-    "nor": "no", "fin": "fi", "dan": "da", "ces": "cs", "cze": "cs", "ell": "el",
-    "gre": "el", "kor": "ko"
-}
 
 # Default configuration values
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -117,30 +111,6 @@ def save_config(cfg: dict[str, Any], updated: bool = True) -> None:
         print(f"\n💾 Config re-saved (no changes) at {CONFIG_PATH}")
 
 
-def normalize_lang_code(code: Optional[str]) -> Optional[str]:
-    """
-    Normalize a language code to ISO 639-1 when possible.
-
-    Accepts:
-    - 2-letter codes (e.g., 'en')
-    - 3-letter codes (e.g., 'eng')
-    - IETF tags with region/script (e.g., 'en-US', 'eng-Latn')
-
-    Returns:
-        2-letter code if recognized, otherwise None.
-    """
-    if not code:
-        return None
-    c = code.lower().strip()
-    base = c.split("-")[0]  # strip region/script
-    if len(base) == 2:
-        return base
-    if len(base) == 3:
-        mapped = ISO639_MAP.get(base)
-        return mapped if mapped and len(mapped) == 2 else None
-    return None
-
-
 def is_valid_language_code(code: str) -> bool:
     """
     Check if a language code is valid (ISO 639-1 or ISO 639-2).
@@ -229,7 +199,6 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
     if interactive:
         if updated:
             save_config(cfg, updated=True)
-            print(f"   ✅ Configuration valid and saved")
         else:
             print(f"   ✅ Configuration valid (no changes)")
 

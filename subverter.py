@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-import sys
-import os
-from pathlib import Path
+from __future__ import annotations
+
 import argparse
-import winreg
-import subprocess
+import json
+import os
 import re
-from config_manager import load_config, validate_config, create_default_config
+import site
+import subprocess
+import sys
+import winreg
+from pathlib import Path
+
+from config_manager import create_default_config, load_config, validate_config
+from lang_utils import filter_allowed_candidates, normalize_lang_code
 
 
 # ============================================================
@@ -35,9 +41,14 @@ def detect_language_from_srt(path: Path) -> str | None:
         text_lines = []
         with open(path, encoding="utf-8", errors="ignore") as f:
             for line in f:
-                if "-->" not in line and not line.strip().isdigit():
-                    text_lines.append(line.strip())
-                if len(text_lines) > 50:
+                if "-->" in line or line.strip().isdigit():
+                    continue
+                line = re.sub(r"<[^>]+>", "", line)  # strip HTML-like tags
+                line = re.sub(r"\{[^}]+\}", "", line)  # strip {tags}
+                line = line.strip()
+                if line:
+                    text_lines.append(line)
+                if len(text_lines) >= 80:
                     break
         sample = " ".join(text_lines)
         if not sample.strip():
@@ -53,56 +64,39 @@ def detect_language_from_srt(path: Path) -> str | None:
 # MKV HELPERS
 # ============================================================
 
-from pathlib import Path
-import json
-import re
-import subprocess
-from typing import Optional, List, Dict, Tuple
-
-# Basic 639-2 -> 639-1 map for common languages encountered in subs
-ISO639_MAP = {
-    "eng": "en", "fra": "fr", "fre": "fr", "deu": "de", "ger": "de", "spa": "es",
-    "ita": "it", "nld": "nl", "dut": "nl", "por": "pt", "rus": "ru", "jpn": "ja",
-    "zho": "zh", "chi": "zh", "ara": "ar", "tur": "tr", "pol": "pl", "swe": "sv",
-    "nor": "no", "fin": "fi", "dan": "da", "ces": "cs", "cze": "cs", "ell": "el",
-    "gre": "el", "kor": "ko"
-}
-
-def normalize_lang_code(code: Optional[str]) -> Optional[str]:
-    """
-    Normalize language code to ISO 639-1 when possible.
-    Accepts codes like 'en', 'eng', 'en-US', 'eng-Latn', etc.
-    Strips region/script and maps 639-2 -> 639-1 if known.
-    """
-    if not code:
-        return None
-    c = code.lower()
-    base = c.split("-")[0]
-    if len(base) == 2:
-        return base
-    if len(base) == 3:
-        return ISO639_MAP.get(base, base) if len(ISO639_MAP.get(base, base)) == 2 else None
-    return None
-
-
-def probe_mkv_subtitles(mkvmerge_path: Path, mkv_path: Path) -> Tuple[List[dict], List[int]]:
+def probe_mkv_subtitles(mkvmerge_path: Path, mkv_path: Path) -> tuple[list[dict], list[int]]:
     """
     Use mkvmerge -J to read all tracks and split into:
     - tagged_subs: list of dicts {id, lang_raw, lang_norm, name, codec}
     - untagged_ids: list of subtitle track IDs with no usable language tag
     """
     try:
+        # First attempt: keep stderr separate so JSON stays clean
         result_json = subprocess.run(
             [str(mkvmerge_path), "-J", str(mkv_path)],
             capture_output=True, text=True, check=True
         )
-        info = json.loads(result_json.stdout)
+        try:
+            info = json.loads(result_json.stdout)
+        except json.JSONDecodeError:
+            # Retry with merged stderr for diagnostics
+            print("❌ mkvmerge output was not valid JSON. Retrying with merged stderr for diagnostics...")
+            debug_run = subprocess.run(
+                [str(mkvmerge_path), "-J", str(mkv_path)],
+                capture_output=True, text=True, check=False,
+                stderr=subprocess.STDOUT
+            )
+            print("---- mkvmerge combined output ----")
+            print(debug_run.stdout)
+            print("---- end output ----")
+            return [], []
     except Exception as e:
-        print(f"❌ Failed to run mkvmerge: {e}")
+        print(f"❌ Failed to run mkvmerge at '{mkvmerge_path}' on file '{mkv_path}': {e}")
+        print("   💡 Check that MKVToolNix is installed and mkvmerge is available at this path.")
         return [], []
 
-    tagged_subs: List[dict] = []
-    untagged_ids: List[int] = []
+    tagged_subs: list[dict] = []
+    untagged_ids: list[int] = []
 
     for track in info.get("tracks", []):
         if track.get("type") != "subtitles":
@@ -138,7 +132,8 @@ def extract_track_to_srt(mkvextract_path: Path, mkv_path: Path, tid: int, out_pa
     try:
         subprocess.run(
             [str(mkvextract_path), "tracks", str(mkv_path), f"{tid}:{out_path}"],
-            check=True
+            check=True,
+            text=True
         )
         return True
     except subprocess.CalledProcessError as e:
@@ -150,10 +145,10 @@ def choose_mkv_subtitle_interactive(
     mkv_path: Path,
     mkvmerge_path: Path,
     mkvextract_path: Path,
-    tagged_subs: List[dict],
-    untagged_ids: List[int],
-    allowed_src_langs_ordered: List[str],
-) -> Tuple[Optional[str], Optional[int], Optional[Path], List[Path]]:
+    tagged_subs: list[dict],
+    untagged_ids: list[int],
+    allowed_src_langs_ordered: list[str],
+) -> tuple[str | None, int | None, Path | None, list[Path]]:
     """
     Build a candidate list and let the user choose.
     - For untagged tracks: extract and detect language up front.
@@ -161,8 +156,8 @@ def choose_mkv_subtitle_interactive(
     - Filters to allowed languages (already excludes target language).
     Returns: (lang_norm, track_id, srt_path, cleanup_paths)
     """
-    cleanup_paths: List[Path] = []
-    candidates: List[dict] = []
+    cleanup_paths: list[Path] = []
+    candidates: list[dict] = []
 
     # Detect untagged languages by extracting them
     if untagged_ids:
@@ -202,18 +197,21 @@ def choose_mkv_subtitle_interactive(
         })
 
     # Filter to allowed languages
-    allowed = [c for c in candidates if c["lang_norm"] in allowed_src_langs_ordered]
+    allowed = filter_allowed_candidates(candidates, allowed_src_langs_ordered)
     if not allowed:
         print("❌ No subtitle tracks match the allowed languages.")
         return None, None, None, cleanup_paths
 
     # Present menu
     print("\n📋 Available subtitle tracks:\n")
-    print("   # | Track ID | Lang | Source            | Name")
-    print("  ---+----------+------+-------------------+---------------------------")
+    print("   # | Track ID | Lang (raw→norm) | Source            | Name")
+    print("  ---+----------+-----------------+-------------------+---------------------------")
     for idx, c in enumerate(allowed, start=1):
         name = c["name"] or "-"
-        print(f"  {idx:>2} | {c['id']:^8} | {c['lang_norm']:^4} | {c['source']:<17} | {name}")
+        raw = c["lang_raw"] or "?"
+        norm = c["lang_norm"] or "?"
+        lang_display = f"{raw}→{norm}" if raw != norm else raw
+        print(f"  {idx:>2} | {c['id']:^8} | {lang_display:^15} | {c['source']:<17} | {name}")
 
     # Ask user to choose
     while True:
@@ -246,17 +244,17 @@ def choose_mkv_subtitle_interactive(
         else:
             print(f"   ❌ Extraction failed for track {selected['id']}")
             return None, None, None, cleanup_paths
-    else:
-        # Already extracted/detected
-        return selected["lang_norm"], selected["id"], selected["srt_path"], cleanup_paths
+
+    # Already extracted/detected
+    return selected["lang_norm"], selected["id"], selected["srt_path"], cleanup_paths
     
 
 def select_mkv_subtitle(
     mkv_path: Path,
     mkvmerge_path: Path,
     mkvextract_path: Path,
-    allowed_src_langs_ordered: List[str],
-) -> Tuple[Optional[str], Optional[int], Optional[Path], List[Path]]:
+    allowed_src_langs_ordered: list[str],
+) -> tuple[str | None, int | None, Path | None, list[Path]]:
     """
     High-level selection strategy:
     - Probe tags.
@@ -266,12 +264,14 @@ def select_mkv_subtitle(
     - If any untagged tracks exist → interactive with full candidate list.
     Returns: (src_lang_norm, track_id, srt_path, cleanup_paths)
     """
+    cleanup_paths: list[Path] = []  # Always initialise at top
+
     tagged, untagged_ids = probe_mkv_subtitles(mkvmerge_path, mkv_path)
 
     # --- Fast-path: all tagged, no untagged ---
     if tagged and not untagged_ids:
         for pref_lang in allowed_src_langs_ordered:
-            matches = [t for t in tagged if t["lang_norm"] == pref_lang]
+            matches = filter_allowed_candidates(tagged, [pref_lang])
             if not matches:
                 continue
 
@@ -280,7 +280,6 @@ def select_mkv_subtitle(
                 print(f"📦 MKV — auto-selected tagged subtitle track {choice['id']} "
                       f"({choice['lang_norm']}) based on priority.")
                 out_srt = mkv_path.with_name(f"{mkv_path.stem}_track{choice['id']}.srt")
-                cleanup_paths: List[Path] = []
                 if extract_track_to_srt(mkvextract_path, mkv_path, choice["id"], out_srt):
                     cleanup_paths.append(out_srt)
                     lang = detect_language_from_srt(out_srt)
@@ -293,12 +292,12 @@ def select_mkv_subtitle(
                         return None, None, None, cleanup_paths
                 else:
                     print(f"   ❌ Extraction failed for track {choice['id']}")
-                    return None, None, None, []
+                    return None, None, None, cleanup_paths
 
             else:
                 # Multiple tracks for the highest available priority language → interactive
                 print("ℹ️ Multiple tracks found for highest available priority language — asking user.")
-                return choose_mkv_subtitle_interactive(
+                lang_norm, track_id, srt_path, extra_cleanup = choose_mkv_subtitle_interactive(
                     mkv_path,
                     mkvmerge_path,
                     mkvextract_path,
@@ -306,13 +305,15 @@ def select_mkv_subtitle(
                     untagged_ids=[],          # none, all tagged here
                     allowed_src_langs_ordered=allowed_src_langs_ordered,
                 )
+                cleanup_paths.extend(extra_cleanup)
+                return lang_norm, track_id, srt_path, cleanup_paths
 
         # No tagged tracks match any allowed language
         print("❌ No tagged tracks match the allowed languages.")
-        return None, None, None, []
+        return None, None, None, cleanup_paths
 
     # --- Interactive path: any untagged exist ---
-    return choose_mkv_subtitle_interactive(
+    lang_norm, track_id, srt_path, extra_cleanup = choose_mkv_subtitle_interactive(
         mkv_path,
         mkvmerge_path,
         mkvextract_path,
@@ -320,6 +321,8 @@ def select_mkv_subtitle(
         untagged_ids=untagged_ids,
         allowed_src_langs_ordered=allowed_src_langs_ordered,
     )
+    cleanup_paths.extend(extra_cleanup)
+    return lang_norm, track_id, srt_path, cleanup_paths
 
 
 # ============================================================
@@ -332,10 +335,6 @@ def install():
     Writes context menu entries under HKCU for current user only.
     Uses 'py' launcher for future-proofing.
     """
-    import winreg
-    import site
-    import os
-
     print("\n🛠️ SubVerter Installation Started")
 
     # --- Dependency installation ---
@@ -375,7 +374,7 @@ def install():
         cmd_key_path = key_path + r"\\command"
 
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            winreg.SetValueEx(key, None, 0, winreg.REG_SZ, "SubVerter")
+            winreg.SetValueEx(key, None, 0, winreg.REG_SZ, "Translate with SubVerter")
             print(f"   📝 Created key: HKCU\\{key_path}")
             print(f"      ↳ Set default value: 'SubVerter'")
 
@@ -400,21 +399,8 @@ def install():
 def uninstall():
     """
     Remove right-click context menu entries for .srt and .mkv files.
-    Requires Administrator privileges for HKCR/HKLM, but here we target HKCU.
     """
-    import winreg
-
     print("\n🧹 SubVerter Uninstallation Started\n")
-
-    # --- Admin check (kept from your original) ---
-    try:
-        test_key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, "SubVerterUninstallTest")
-        winreg.CloseKey(test_key)
-        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, "SubVerterUninstallTest")
-    except PermissionError:
-        print("❌ Administrator privileges required to modify registry.")
-        print("🔒 Please run this script from an elevated command prompt.\n")
-        return
 
     # --- Registry cleanup ---
     extensions = [".srt", ".mkv"]
@@ -449,8 +435,6 @@ def run_pipeline(files):
     - MKV: select a single subtitle track using tagged preference or interactive choice,
            extract to SRT, validate language, and proceed.
     """
-    from config_manager import load_config
-
     cfg = load_config()
 
     # Build runtime allowlist without target language
@@ -480,63 +464,62 @@ def run_pipeline(files):
             continue
 
         src_lang = None
-        working_srt: Optional[Path] = None
-        cleanup_paths: List[Path] = []
+        working_srt: Path | None = None
+        cleanup_paths: list[Path] = []  # Always initialise
 
-        # --- SRT handling ---
-        if f.suffix.lower() == ".srt":
-            lang = detect_language_from_srt(f)
-            if not lang:
-                print(f"❌ Could not detect language for {f.name}.")
+        try:
+            # --- SRT handling ---
+            if f.suffix.lower() == ".srt":
+                lang = detect_language_from_srt(f)
+                if not lang:
+                    print(f"❌ Could not detect language for {f.name}.")
+                    continue
+                src_lang = normalize_lang_code(lang)
+                print(f"🌐 Detected source language: {src_lang}")
+
+                if src_lang not in allowed_src_langs_ordered:
+                    print(f"❌ Source language '{src_lang}' is not in allowed list.")
+                    continue
+
+                working_srt = f
+
+            # --- MKV handling ---
+            elif f.suffix.lower() == ".mkv":
+                if not mkvmerge_path.exists() or not mkvextract_path.exists():
+                    print(f"❌ mkvtoolnix not found (expected mkvmerge at {mkvmerge_path}, mkvextract at {mkvextract_path})")
+                    print("   Update mkvextract_path in config or install MKVToolNix.\n")
+                    continue
+
+                src_lang, track_id, srt_path, cleanup_paths = select_mkv_subtitle(
+                    mkv_path=f,
+                    mkvmerge_path=mkvmerge_path,
+                    mkvextract_path=mkvextract_path,
+                    allowed_src_langs_ordered=allowed_src_langs_ordered
+                )
+
+                if not src_lang or not srt_path:
+                    print("❌ No usable subtitle track selected or extraction failed.\n")
+                    continue
+
+                working_srt = srt_path
+
+            else:
+                print(f"⚠️ Unsupported file type: {f.name} (.{f.suffix.lstrip('.')}) — skipping.\n")
                 continue
-            src_lang = normalize_lang_code(lang)
-            print(f"🌐 Detected source language: {src_lang}")
 
-            #if allowed_set and src_lang not in allowed_set:
-            if src_lang not in allowed_src_langs_ordered:
-                print(f"❌ Source language '{src_lang}' is not in allowed list.")
-                continue
+            # --- Post-selection summary ---
+            print(f"\n🎯 Target language: {cfg['target_language']}")
+            print("➡️ Step 1: Parse and block build")
+            print("➡️ Step 2: Send to model backend")
+            print("➡️ Step 3: Validate and reformat")
+            print("💾 Step 4: Write final SRT to output folder\n")
 
-            working_srt = f
-
-        # --- MKV handling ---
-        elif f.suffix.lower() == ".mkv":
-            if not mkvmerge_path.exists() or not mkvextract_path.exists():
-                print(f"❌ mkvtoolnix not found (expected mkvmerge at {mkvmerge_path}, mkvextract at {mkvextract_path})")
-                print("   Update mkvextract_path in config or install MKVToolNix.\n")
-                continue
-
-            src_lang, track_id, srt_path, cleanup_paths = select_mkv_subtitle(
-                mkv_path=f,
-                mkvmerge_path=mkvmerge_path,
-                mkvextract_path=mkvextract_path,
-                allowed_src_langs_ordered=allowed_src_langs_ordered
-            )
-
-            if not src_lang or not srt_path:
-                print("❌ No usable subtitle track selected or extraction failed.\n")
+        finally:
+            # Cleanup temps — keep the chosen working file if you plan to use it
+            if cleanup_paths:
                 for p in cleanup_paths:
-                    p.unlink(missing_ok=True)
-                continue
-
-            working_srt = srt_path
-
-        else:
-            print("⚠️ Unsupported file type. Skipping.\n")
-            continue
-
-        # --- Post-selection summary ---
-        print(f"\n🎯 Target language: {cfg['target_language']}")
-        print("➡️ Step 1: Parse and block build")
-        print("➡️ Step 2: Send to model backend")
-        print("➡️ Step 3: Validate and reformat")
-        print("💾 Step 4: Write final SRT to output folder\n")
-
-        # Cleanup temps (MKV path) — keep the chosen working file if you plan to use it
-        if cleanup_paths:
-            for p in cleanup_paths:
-                if p != working_srt:
-                    p.unlink(missing_ok=True)
+                    if p != working_srt:
+                        p.unlink(missing_ok=True)
 
 
 # ============================================================
@@ -556,11 +539,11 @@ def main():
     )
     parser.add_argument(
         "--install", action="store_true",
-        help="Install right-click context menu entry (dry-run by default)"
+        help="Install right-click context menu entry"
     )
     parser.add_argument(
         "--uninstall", action="store_true",
-        help="Uninstall right-click context menu entry (dry-run by default)"
+        help="Uninstall right-click context menu entry"
     )
 
     args = parser.parse_args()
