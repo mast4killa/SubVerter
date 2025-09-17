@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
 """
 Configuration management for SubVerter.
 
@@ -12,22 +15,38 @@ import json
 from pathlib import Path
 from typing import Any
 
-from lang_utils import normalize_lang_code
+from subverter_lib.lang_utils import normalize_lang_code
 
-# Path to the configuration file (stored alongside this script)
-CONFIG_PATH: Path = Path(__file__).with_name("config.json")
-
+# Path to the configuration file (stored in cfg/ at project root)
+CONFIG_PATH = Path(__file__).parent.parent / "cfg" / "config.json"
 
 # Default configuration values
 DEFAULT_CONFIG: dict[str, Any] = {
-    "_note": "Language codes follow ISO 639-1 or ISO 639-2. See: https://codeberg.org/mbunkus/mkvtoolnix/wiki/Languages-in-Matroska-and-MKVToolNix",
+    "_note_context_mode": (
+        "Controls how context is handled between translation blocks. Allowed values: "
+        "'fresh_with_summary' = new chat per block + rolling summary, "
+        "'fresh_no_summary' = new chat per block, no summary, "
+        "'reuse_chat' = reuse same chat for all blocks, no summary."
+    ),
+    "context_mode": "fresh_with_summary",
+    "summary_max_chars": 500,
+
+    "_note_target_language": (
+        "Language codes follow ISO 639-1 or ISO 639-2. "
+        "See: https://codeberg.org/mbunkus/mkvtoolnix/wiki/"
+        "Languages-in-Matroska-and-MKVToolNix"
+    ),
     "target_language": "nl",
+    "allowed_src_langs_ordered": ["en", "fr", "de", "es", "it"],
+
+    "backend": "copilot_web",
+    "model": "ignored_for_copilot_web",
+
     "ollama_path": str(Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe"),
     "mkvextract_path": Path("C:/Program Files/MKVToolNix/mkvextract.exe"),
     "mkvmerge_path": Path("C:/Program Files/MKVToolNix/mkvmerge.exe"),
-    "model": "mistral",
+
     "char_limit": 2500,
-    "allowed_src_langs_ordered": ["en", "fr", "de", "es", "it"],
 }
 
 
@@ -40,7 +59,7 @@ def create_default_config() -> None:
         print(f"   ⚠️ Config already exists at {CONFIG_PATH}")
         return
 
-    def stringify_paths(obj):
+    def stringify_paths(obj: Any) -> Any:
         if isinstance(obj, dict):
             return {k: stringify_paths(v) for k, v in obj.items()}
         if isinstance(obj, list):
@@ -101,8 +120,7 @@ def save_config(cfg: dict[str, Any], updated: bool = True) -> None:
     Converts Path objects back to strings for JSON serialisation.
     """
     serialisable_cfg = {
-        k: str(v) if isinstance(v, Path) else v
-        for k, v in cfg.items()
+        k: str(v) if isinstance(v, Path) else v for k, v in cfg.items()
     }
     CONFIG_PATH.write_text(json.dumps(serialisable_cfg, indent=2), encoding="utf-8")
     if updated:
@@ -116,8 +134,10 @@ def is_valid_language_code(code: str) -> bool:
     Check if a language code is valid (ISO 639-1 or ISO 639-2).
     """
     valid_langs = {
-        "en", "fr", "de", "es", "it", "nl", "pt", "ru", "ja", "zh", "ar", "tr", "pl", "sv", "no", "fi", "da", "cs", "el", "ko",
-        "eng", "fra", "deu", "spa", "ita", "nld", "por", "rus", "jpn", "zho", "ara", "tur", "pol", "swe", "nor", "fin", "dan", "ces", "ell", "kor"
+        "en", "fr", "de", "es", "it", "nl", "pt", "ru", "ja", "zh", "ar", "tr", "pl",
+        "sv", "no", "fi", "da", "cs", "el", "ko",
+        "eng", "fra", "deu", "spa", "ita", "nld", "por", "rus", "jpn", "zho", "ara",
+        "tur", "pol", "swe", "nor", "fin", "dan", "ces", "ell", "kor",
     }
     return code.lower() in valid_langs
 
@@ -154,7 +174,9 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
             print(f"         ❌ {tool_key} not found at {current_path}")
             ok = False
             if interactive:
-                new_path = input(f"         Enter correct path for {tool_key} (or leave blank to skip): ").strip()
+                new_path = input(
+                    f"         Enter correct path for {tool_key} (or leave blank to skip): "
+                ).strip()
                 if new_path:
                     cfg[tool_key] = Path(new_path)
                     if Path(new_path).exists():
@@ -167,6 +189,24 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
 
     # --- Language code checks ---
     print("      🌐 Language codes:")
+
+    # --- Context mode checks ---
+    print("      🧠 Context handling:")
+    allowed_modes = {"fresh_with_summary", "fresh_no_summary", "reuse_chat"}
+    mode = cfg.get("context_mode")
+    if mode not in allowed_modes:
+        print(f"         ⚠️ Invalid context_mode: {mode}")
+        ok = False
+    else:
+        print(f"         ✅ context_mode: {mode}")
+
+    # --- Summary max chars check ---
+    summary_chars = cfg.get("summary_max_chars", 500)
+    if not isinstance(summary_chars, int) or summary_chars <= 0:
+        print(f"         ⚠️ Invalid summary_max_chars: {summary_chars} (must be positive int)")
+        ok = False
+    else:
+        print(f"         ✅ summary_max_chars: {summary_chars}")
 
     # Target language
     raw_target = cfg.get("target_language", "")
@@ -191,7 +231,10 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
         normalized_allowed.append(norm_lang)
 
     if normalized_allowed != raw_allowed:
-        print(f"         ℹ️ Normalized allowed_src_langs_ordered: {raw_allowed} -> {normalized_allowed}")
+        print(
+            f"         ℹ️ Normalized allowed_src_langs_ordered: "
+            f"{raw_allowed} -> {normalized_allowed}"
+        )
         cfg["allowed_src_langs_ordered"] = normalized_allowed
         updated = True
 
@@ -200,6 +243,6 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
         if updated:
             save_config(cfg, updated=True)
         else:
-            print(f"   ✅ Configuration valid (no changes)")
+            print("   ✅ Configuration valid (no changes)")
 
     return ok

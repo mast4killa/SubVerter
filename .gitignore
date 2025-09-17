@@ -218,3 +218,10 @@ __marimo__/
 
 # Output folder for translated subtitles
 /output/
+
+# Ignore actual config and session state
+cfg/config.json
+cfg/copilot_storage.json
+
+# Ignore VS Code workspace settings — contains only a local Python extraPaths override
+.vscode/settings.json
