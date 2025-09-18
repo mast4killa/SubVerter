@@ -19,11 +19,20 @@ from playwright.sync_api import sync_playwright, Page  # ✅ sync API
 COPILOT_URL = "https://copilot.microsoft.com"
 STORAGE_FILE = Path(__file__).parent.parent / "cfg" / "copilot_storage.json"
 
+# Selector for the Copilot prompt text box.
+# If Microsoft changes the DOM, update this in ONE place.
+PROMPT_SELECTOR = "textarea#userInput"
+
 
 class CopilotClient:
     def __init__(self, headless: bool = True) -> None:
         self.headless = headless
         self.storage_file = STORAGE_FILE
+        # For persistent browser mode
+        self._p = None
+        self._browser = None
+        self._context = None
+        self._page: Optional[Page] = None
 
     def login_and_save_session(self) -> None:
         """
@@ -47,6 +56,127 @@ class CopilotClient:
 
         print(f"\n💾 Session saved to: {self.storage_file}")
 
+    # ------------------------------
+    # Persistent session helpers
+    # ------------------------------
+    def launch(self, verbosity: int = 0) -> None:
+        """
+        Launch browser and open Copilot once (persistent browser mode).
+        Also switches to Smart (GPT‑5) mode once per session.
+        """
+        if not self.storage_file.exists():
+            raise FileNotFoundError(
+                f"No saved session found at {self.storage_file}. "
+                f"Run login_and_save_session() first."
+            )
+        if self._browser:
+            return  # already launched
+
+        self._p = sync_playwright().start()
+        self._browser = self._p.chromium.launch(headless=self.headless)
+        self._context = self._browser.new_context(storage_state=str(self.storage_file))
+        self._page = self._context.new_page()
+        if verbosity >= 3:
+            print(f"➡️ Navigating to {COPILOT_URL}")
+        self._page.goto(COPILOT_URL)
+        if verbosity >= 3:
+            print("⏳ Waiting for chat textarea…")
+        self._page.wait_for_selector(PROMPT_SELECTOR, timeout=15000)
+
+        # Switch to Smart mode once per session
+        if verbosity >= 3:
+            print("🧠 Switching to Smart (GPT‑5) mode…")
+        human_submit(
+            self._page,
+            "",  # no intro text
+            "",  # no subtitles text
+            "Tab,Tab,Enter,ArrowDown,ArrowDown,Enter,Shift+Tab,Shift+Tab"
+        )
+        human_delay(0.5, 1.2)
+
+    def start_new_topic(self, verbosity: int = 0) -> None:
+        """
+        Use keyboard navigation to trigger 'New topic' in the Copilot UI.
+        This is used in persistent browser mode so each translation block
+        starts with a clean chat thread.
+
+        Adjust the key sequence if Copilot changes its UI tab order.
+        """
+        if not self._page:
+            raise RuntimeError("CopilotClient not launched. Call launch() first.")
+
+        if verbosity >= 3:
+            print("🆕 Starting a new chat topic via keyboard…")
+
+        # Navigate to the "New topic" button and activate it using keyboard only.
+        human_submit(
+            self._page,
+            "",  # no intro text
+            "",  # no subtitles text
+            "Tab,Tab,Tab,Enter,Enter"  # example: navigate to toolbar, press Enter twice
+        )
+
+        human_delay(0.5, 1.2)
+        self._page.wait_for_selector(PROMPT_SELECTOR, timeout=10000)
+
+    def send_prompt(self, prompt_text: str, timeout_sec: int = 30, verbosity: int = 0) -> Optional[str]:
+        """
+        Send a prompt in the already-open Copilot tab (persistent browser mode).
+        """
+        if not self._page:
+            raise RuntimeError("CopilotClient not launched. Call launch() first.")
+
+        if verbosity >= 3:
+            print(f"⌨️ Entering prompt: {prompt_text!r}")
+        self._page.fill(PROMPT_SELECTOR, prompt_text)
+        self._page.keyboard.press("Enter")
+
+        if verbosity >= 3:
+            print("⏳ Waiting for assistant's reply container…")
+        self._page.wait_for_selector('div[data-content="ai-message"]', timeout=timeout_sec * 1000)
+
+        messages = self._page.query_selector_all('div[data-content="ai-message"]')
+        last_msg = messages[-1]
+
+        if verbosity >= 3:
+            print("⏳ Waiting for reply content to stabilise…")
+
+        stable_count = 0
+        last_html = ""
+        start_time = time.time()
+        while time.time() - start_time < timeout_sec:
+            current_html = last_msg.inner_html()
+            if current_html == last_html:
+                stable_count += 1
+            else:
+                stable_count = 0
+                last_html = current_html
+            if stable_count >= 2:
+                break
+            time.sleep(1)
+
+        spans = last_msg.query_selector_all("span.font-ligatures-none.whitespace-pre-wrap")
+        texts = [span.inner_text().strip() for span in spans if span.inner_text().strip()]
+        if verbosity >= 3:
+            print(f"📄 Found {len(texts)} spans in assistant's reply.")
+        return "\n".join(texts).strip() if texts else None
+
+    def close(self) -> None:
+        """
+        Close browser and Playwright (persistent browser mode).
+        """
+        if self._browser:
+            self._browser.close()
+        if self._p:
+            self._p.stop()
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._p = None
+
+    # ------------------------------
+    # One-shot mode (current behaviour)
+    # ------------------------------
     def run_prompt(self, prompt_text: str, timeout_sec: int = 30, verbosity: int = 0) -> Optional[str]:
         """
         Send a prompt to Copilot and return the full text response from the assistant only.
@@ -74,31 +204,45 @@ class CopilotClient:
 
             if verbosity >= 3:
                 print("⏳ Waiting for chat textarea…")
-            page.wait_for_selector("textarea", timeout=15000)
+            page.wait_for_selector(PROMPT_SELECTOR, timeout=15000)
 
+            # Small human-like pause before interacting
+            human_delay(0.8, 1.5)
+
+            # 1) Switch to Smart mode (adjust sequence to match actual UI tab order)
             if verbosity >= 3:
-                print(f"⌨️ Filling prompt: {prompt_text!r}")
-            page.fill("textarea", prompt_text)
-            page.keyboard.press("Enter")
+                print("🧠 Switching to Smart (GPT‑5) mode…")
+            human_submit(
+                page,
+                "",  # no intro text
+                "",  # no subtitles text
+                "Tab,Tab,Enter,ArrowDown,ArrowDown,Enter,Shift+Tab,Shift+Tab"
+            )
+            human_delay(0.5, 1.2)
+
+            # 2) Enter prompt and submit via keyboard
+            if verbosity >= 3:
+                print(f"⌨️ Entering prompt via human_submit: {prompt_text!r}")
+            human_submit(
+                page,
+                "",              # intro_text
+                prompt_text,     # subtitles_text
+                "Tab,Tab,Tab,Tab,Enter"  # navigate to submit button and press Enter
+            )
 
             if verbosity >= 3:
                 print("⏳ Waiting for assistant's reply container…")
-
-            # Wait for a new ai-message container to appear
             page.wait_for_selector('div[data-content="ai-message"]', timeout=timeout_sec * 1000)
 
-            # Get the last ai-message container (assistant's reply)
             messages = page.query_selector_all('div[data-content="ai-message"]')
             last_msg = messages[-1]
 
             if verbosity >= 3:
                 print("⏳ Waiting for reply content to stabilise…")
 
-            # Wait until the HTML inside the container stops changing
             stable_count = 0
             last_html = ""
             start_time = time.time()
-
             while time.time() - start_time < timeout_sec:
                 current_html = last_msg.inner_html()
                 if current_html == last_html:
@@ -106,39 +250,43 @@ class CopilotClient:
                 else:
                     stable_count = 0
                     last_html = current_html
-
-                if stable_count >= 2:  # unchanged for ~2 seconds
+                if stable_count >= 2:
                     break
-
                 time.sleep(1)
 
-            # Extract only the spans inside this message
             spans = last_msg.query_selector_all("span.font-ligatures-none.whitespace-pre-wrap")
             texts = [span.inner_text().strip() for span in spans if span.inner_text().strip()]
-
             if verbosity >= 3:
                 print(f"📄 Found {len(texts)} spans in assistant's reply.")
 
             response_text = "\n".join(texts)
-
             browser.close()
             return response_text.strip() if response_text else None
 
 
-# ==============================
-# HUMAN-LIKE DELAY (sync version)
-# ==============================
+# ================
+# HUMAN-LIKE DELAY
+# ================
 def human_delay(short_range=(0.3, 3.0), long_range=(3.0, 8.0), long_chance=0.1):
     """
     Pause for a human-like random delay.
-    - short_range: tuple(min, max) seconds for most pauses
-    - long_range: tuple(min, max) seconds for occasional longer pauses
+
+    - short_range: tuple(min, max) seconds for most pauses, or two floats
+    - long_range: tuple(min, max) seconds for occasional longer pauses, or two floats
     - long_chance: probability (0-1) of using a long pause
     """
+    # Normalise to tuples if floats are passed
+    if not isinstance(short_range, (tuple, list)):
+        short_range = (float(short_range), float(long_range))
+        long_range = (3.0, 8.0)  # reset to default long range if floats were given
+    elif not isinstance(long_range, (tuple, list)):
+        long_range = (float(long_range), float(long_range))
+
     if random.random() < long_chance:
         delay = random.uniform(*long_range)
     else:
         delay = random.uniform(*short_range)
+
     time.sleep(delay)
 
 
@@ -208,7 +356,7 @@ def human_click(page: Page, selector: str, move_steps=25):
 # Selector for the Copilot prompt text box.
 # If Microsoft changes the DOM, update this in ONE place.
 # Tip: You can inspect the page in your browser to find the new selector.
-PROMPT_SELECTOR = "textarea.prompt-input"
+PROMPT_SELECTOR = "textarea#userInput"
 
 def human_submit(page: Page, intro_text: str, subtitles_text: str, sequence: str):
     """

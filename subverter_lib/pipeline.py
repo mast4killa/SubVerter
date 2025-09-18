@@ -34,14 +34,12 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
     """
     cfg = load_config()
 
-    # Derive behaviour flags from context_mode
-    mode = cfg.get("context_mode", "fresh_with_summary")
-    reuse_chat = (mode == "reuse_chat")
-    use_summary = (mode == "fresh_with_summary")
+    # Derive behaviour flags from config
+    keep_browser_alive = bool(cfg.get("keep_browser_alive", False))
     summary_max_chars = cfg.get("summary_max_chars", 500)
 
     if verbosity >= 1:
-        print(f"   🧠 Context mode: {mode} | reuse_chat={reuse_chat} | use_summary={use_summary}")
+        print(f"   🧠 keep_browser_alive={keep_browser_alive} | summary_max_chars={summary_max_chars}")
 
     # Build runtime allowlist without target language
     tgt_lang = cfg["target_language"].lower()
@@ -142,6 +140,9 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                 timeout_sec=cfg.get("timeout_sec", 120),
             ))
 
+            # Tell the adapter whether to keep a single Copilot browser session alive
+            llm._keep_browser_alive = keep_browser_alive
+
             translations = translate_entries_with_context(
                 entries=entries,
                 src_lang=src_lang,
@@ -149,8 +150,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                 llm=llm,
                 char_limit=cfg.get("char_limit", 2500),
                 verbosity=verbosity,
-                reuse_chat=reuse_chat,
-                use_summary=use_summary,
+                keep_browser_alive=keep_browser_alive,
                 summary_max_chars=summary_max_chars
             )
 
@@ -192,6 +192,17 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
             print(f"✅ Wrote: {out_path}")
 
         finally:
+            # Close persistent Copilot session if it was used
+            try:
+                if getattr(llm, "_keep_browser_alive", False) and getattr(llm, "config", None):
+                    if llm.config.backend.lower() == "copilot_web":
+                        if hasattr(llm, "_copilot_client") and llm._copilot_client:
+                            llm._copilot_client.close()
+                            llm._copilot_client = None
+            except Exception as e:
+                if verbosity >= 1:
+                    print(f"⚠️ Failed to close persistent Copilot session: {e}")
+
             # Cleanup temporary files (except the chosen working file)
             for p in cleanup_paths:
                 if p != working_srt:

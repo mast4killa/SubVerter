@@ -68,3 +68,20 @@ def filter_allowed_candidates(
         c for c in candidates
         if c.get("lang_norm") is not None and c["lang_norm"] in allowed_langs
     ]
+
+
+def normalize_text(text) -> str:
+    """
+    Ensure any subtitle entry text is flattened into a single clean string.
+
+    - If `text` is a list (e.g., multiple lines), join with spaces.
+    - If it's not a string, convert it.
+    - Collapse multiple spaces/tabs/newlines into single spaces.
+    """
+    if isinstance(text, list):
+        text = " ".join(map(str, text))
+    else:
+        text = str(text)
+
+    # Replace newlines with spaces, then collapse multiple spaces
+    return " ".join(text.split())

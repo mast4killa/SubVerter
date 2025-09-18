@@ -142,6 +142,12 @@ class LLMAdapter:
         """
         Call Copilot Web (https://copilot.microsoft.com) via Playwright automation.
         Requires subverter_lib/copilot_client.py and a saved login session.
+
+        Current behaviour:
+        - Always sends a full-context prompt (rolling summary + local context).
+        - If self._keep_browser_alive is True: reuse a persistent CopilotClient/browser session
+        across multiple calls (launch once), but start a NEW chat for each call.
+        - If False: use one-shot mode (launch, send, close each time).
         """
         try:
             from subverter_lib.copilot_client import CopilotClient
@@ -156,16 +162,44 @@ class LLMAdapter:
             preview = "\n".join(lines[:5] + (["..."] if len(lines) > 10 else []) + lines[-5:])
             print("\n      🛈 [LLMAdapter] Prompt preview:\n" + preview + "\n")
 
-        client = CopilotClient(headless=(verbosity < 2))
+        # Check if we're in persistent browser mode (set in run_pipeline)
+        keep_alive = getattr(self, "_keep_browser_alive", False)
+
         try:
-            resp = client.run_prompt(prompt, timeout_sec=self.config.timeout_sec, verbosity=verbosity)
+            if keep_alive:
+                if not hasattr(self, "_copilot_client") or self._copilot_client is None:
+                    self._copilot_client = CopilotClient(headless=(verbosity < 2))
+                    self._copilot_client.launch(verbosity=verbosity)
+                    first_block = True
+                else:
+                    first_block = False
+
+                if not first_block:
+                    self._copilot_client.start_new_topic(verbosity=verbosity)
+
+                resp = self._copilot_client.send_prompt(
+                    prompt_text=prompt,
+                    timeout_sec=self.config.timeout_sec,
+                    verbosity=verbosity
+                )
+            else:
+                # One-shot mode: launch, send, close each time
+                client = CopilotClient(headless=(verbosity < 2))
+                resp = client.run_prompt(
+                    prompt,
+                    timeout_sec=self.config.timeout_sec,
+                    verbosity=verbosity
+                )
+
             if verbosity >= 3 and resp:
                 print("      🛈 [LLMAdapter] Full raw output from Copilot Web:\n" + resp + "\n")
             elif verbosity == 2 and resp:
                 out_lines = resp.splitlines()
                 preview_out = "\n".join(out_lines[:5] + (["..."] if len(out_lines) > 10 else []) + out_lines[-5:])
                 print("      🛈 [LLMAdapter] Output preview:\n" + preview_out + "\n")
+
             return resp
+
         except FileNotFoundError as e:
             print(f"❌ {e}")
             print("   ↳ Run CopilotClient.login_and_save_session() first to create a session.")

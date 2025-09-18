@@ -22,13 +22,11 @@ CONFIG_PATH = Path(__file__).parent.parent / "cfg" / "config.json"
 
 # Default configuration values
 DEFAULT_CONFIG: dict[str, Any] = {
-    "_note_context_mode": (
-        "Controls how context is handled between translation blocks. Allowed values: "
-        "'fresh_with_summary' = new chat per block + rolling summary, "
-        "'fresh_no_summary' = new chat per block, no summary, "
-        "'reuse_chat' = reuse same chat for all blocks, no summary."
-    ),
-    "context_mode": "fresh_with_summary",
+    # Keep one browser window open and start a new chat per block (faster).
+    # If false, launch and close a browser window for each block (slowest, but equivalent results).
+    "keep_browser_alive": True,
+
+    # Rolling summary length cap used when building prompts.
     "summary_max_chars": 500,
 
     "_note_target_language": (
@@ -46,6 +44,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "mkvextract_path": Path("C:/Program Files/MKVToolNix/mkvextract.exe"),
     "mkvmerge_path": Path("C:/Program Files/MKVToolNix/mkvmerge.exe"),
 
+    # Prompt character limit safeguard (applied to constructed prompts before sending).
     "char_limit": 2500,
 }
 
@@ -150,6 +149,8 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
     1. Tool paths (ollama, mkvextract, mkvmerge) must exist.
     2. Target language must be valid after normalization.
     3. Allowed source languages must be valid after normalization.
+    4. keep_browser_alive must be a boolean.
+    5. summary_max_chars must be a positive integer.
 
     Args:
         cfg: The configuration dictionary to validate.
@@ -190,24 +191,6 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
     # --- Language code checks ---
     print("      🌐 Language codes:")
 
-    # --- Context mode checks ---
-    print("      🧠 Context handling:")
-    allowed_modes = {"fresh_with_summary", "fresh_no_summary", "reuse_chat"}
-    mode = cfg.get("context_mode")
-    if mode not in allowed_modes:
-        print(f"         ⚠️ Invalid context_mode: {mode}")
-        ok = False
-    else:
-        print(f"         ✅ context_mode: {mode}")
-
-    # --- Summary max chars check ---
-    summary_chars = cfg.get("summary_max_chars", 500)
-    if not isinstance(summary_chars, int) or summary_chars <= 0:
-        print(f"         ⚠️ Invalid summary_max_chars: {summary_chars} (must be positive int)")
-        ok = False
-    else:
-        print(f"         ✅ summary_max_chars: {summary_chars}")
-
     # Target language
     raw_target = cfg.get("target_language", "")
     norm_target = normalize_lang_code(raw_target) or ""
@@ -237,6 +220,23 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
         )
         cfg["allowed_src_langs_ordered"] = normalized_allowed
         updated = True
+
+    # --- Context handling checks (present behaviour only) ---
+    print("      🧠 Context handling:")
+    keep_alive = cfg.get("keep_browser_alive", False)
+    if not isinstance(keep_alive, bool):
+        print(f"         ⚠️ Invalid keep_browser_alive: {keep_alive} (must be boolean)")
+        ok = False
+    else:
+        print(f"         ✅ keep_browser_alive: {keep_alive}")
+
+    # --- Summary max chars check ---
+    summary_chars = cfg.get("summary_max_chars", 500)
+    if not isinstance(summary_chars, int) or summary_chars <= 0:
+        print(f"         ⚠️ Invalid summary_max_chars: {summary_chars} (must be positive int)")
+        ok = False
+    else:
+        print(f"         ✅ summary_max_chars: {summary_chars}")
 
     # --- Save only if updated ---
     if interactive:

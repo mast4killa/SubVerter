@@ -16,6 +16,7 @@ from typing import List, Optional
 from subverter_lib.srt_utils import SRTEntry, build_blocks, context_slice
 from subverter_lib.prompt_utils import build_translation_prompt, build_summary_prompt
 from subverter_lib.llm_adapter import LLMAdapter
+from subverter_lib.lang_utils import normalize_text
 
 # Regex to detect ENTRY labels at the start of lines
 ENTRY_LABEL_RE = re.compile(r"^ENTRY\s+\d+:\s*", re.IGNORECASE)
@@ -124,8 +125,7 @@ def translate_entries_with_context(
     llm: LLMAdapter,
     char_limit: int,
     verbosity: int = 0,
-    reuse_chat: bool = False,
-    use_summary: bool = True,
+    keep_browser_alive: bool = False,
     summary_max_chars: int = 500
 ) -> Optional[List[str]]:
     """
@@ -135,11 +135,11 @@ def translate_entries_with_context(
         entries: Parsed SRT entries.
         src_lang: Source language code.
         tgt_lang: Target language code.
-        llm: LLMAdapter instance (used if reuse_chat=True).
+        llm: LLMAdapter instance (used if keep_browser_alive=True).
         char_limit: Max characters per translation block.
         verbosity: Verbosity level.
-        reuse_chat: If True, reuse the same LLM session for all blocks.
-        use_summary: If True, maintain and pass a rolling summary.
+        keep_browser_alive: If True, keep the same browser session alive for all blocks
+                            (persistent mode), starting a new chat per block.
         summary_max_chars: Max characters to keep in rolling summary.
     """
     # Helper: split on ENTRY labels instead of double newlines
@@ -155,7 +155,7 @@ def translate_entries_with_context(
     if verbosity >= 1:
         print(f"   🛈 Built {len(blocks)} translation blocks (char_limit={char_limit}).")
 
-    # If reusing chat, we use the provided llm for all blocks
+    # If keeping browser alive, we use the provided llm for all blocks
     # If not, we'll create a fresh LLMAdapter per block
     for bi, (start, end) in enumerate(blocks, start=1):
         block_entries = entries[start: end + 1]
@@ -175,12 +175,10 @@ def translate_entries_with_context(
             print("\n      ↳ Previous context:\n", prev_ctx or "(none)")
             print("\n      ↳ Next context:\n", next_ctx or "(none)")
 
-        # Decide what summary to pass into the translation prompt
-        summary_for_prompt = ""
-        if use_summary and rolling_summary:
-            summary_for_prompt = rolling_summary
-            if verbosity >= 3:
-                print(f"      🛈 Summary passed to prompt ({len(summary_for_prompt)} chars): {repr(summary_for_prompt)}")
+        # Always include rolling summary if available
+        summary_for_prompt = rolling_summary
+        if summary_for_prompt and verbosity >= 3:
+            print(f"      🛈 Summary passed to prompt ({len(summary_for_prompt)} chars): {repr(summary_for_prompt)}")
 
         # Build the translation prompt for this block
         prompt = build_translation_prompt(
@@ -194,7 +192,7 @@ def translate_entries_with_context(
         )
 
         # Choose LLM instance
-        if reuse_chat:
+        if keep_browser_alive:
             llm_instance = llm
         else:
             # Fresh browser/session per block
@@ -238,10 +236,9 @@ def translate_entries_with_context(
         # Store the translated block
         translations.append(resp.strip())
 
-        # Update rolling summary only if enabled
-        if use_summary:
-            # Build a proper summary update prompt using the existing summary and new dialogue
-            recent_text = " ".join(" ".join(e.text.splitlines()).split() for e in block_entries)
+        # Update rolling summary for next block
+        if bi < len(blocks):
+            recent_text = " ".join(normalize_text(e.text) for e in block_entries)
             summary_prompt = build_summary_prompt(
                 src_lang=src_lang,
                 previous_summary=rolling_summary,
@@ -249,11 +246,10 @@ def translate_entries_with_context(
                 max_chars=summary_max_chars
             )
 
-            # Use the same llm_instance if reusing chat; otherwise, spin up a fresh one for the summary update
-            summary_llm = llm_instance if reuse_chat else LLMAdapter(llm.config)
+            # Use the same llm_instance if keeping browser alive; otherwise, spin up a fresh one
+            summary_llm = llm_instance if keep_browser_alive else LLMAdapter(llm.config)
             new_summary = summary_llm.generate(summary_prompt, verbosity=verbosity)
 
-            # Store updated summary (cap length defensively)
             if new_summary:
                 rolling_summary = new_summary.strip()
                 if len(rolling_summary) > summary_max_chars:
