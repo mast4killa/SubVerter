@@ -195,12 +195,33 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                 final_entries.append((e.idx, e.start, e.end, formatted))
 
             # --- Step 4: Write final SRT ---
-            print("💾 Step 4: Write final SRT to current folder")
-            out_path = Path(f"{working_srt.stem}.{cfg['target_language']}.srt")
+            print("💾 Step 4: Write final SRT next to input file")
 
-            # If the target file already exists, rename it to .old
+            # Decide base name:
+            if f.suffix.lower() == ".srt":
+                # If filename ends with ".<src_lang>.srt", strip the src_lang part
+                src_suffix = f".{src_lang.lower()}"
+                if f.stem.lower().endswith(src_suffix):
+                    base_name = f.stem[: -len(src_suffix)]
+                else:
+                    base_name = f.stem
+            else:
+                # MKV case: use MKV's stem (no _track# from extracted temp SRT)
+                base_name = f.stem
+
+            # Build output path in the same directory as the input file
+            out_path = f.parent / f"{base_name}.{cfg['target_language']}.srt"
+
+            if verbosity >= 1:
+                print(f"   🛈 Target path: {out_path}")
+
+            # If the target file already exists, rename it to .old (with counter if needed)
             if out_path.exists():
                 backup_path = out_path.with_suffix(out_path.suffix + ".old")
+                counter = 1
+                while backup_path.exists():
+                    backup_path = out_path.with_suffix(out_path.suffix + f".old.{counter}")
+                    counter += 1
                 try:
                     out_path.rename(backup_path)
                     if verbosity >= 1:
@@ -209,6 +230,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                     print(f"❌ Failed to rename existing file {out_path} to {backup_path}: {e}")
                     return
 
+            # Write the final SRT
             try:
                 with open(out_path, "w", encoding="utf-8", newline="\n") as w:
                     for i, (idx, start, end, text) in enumerate(final_entries, start=1):
