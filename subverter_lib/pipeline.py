@@ -238,17 +238,17 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                         w.write(f"{start} --> {end}\n")
                         w.write(text.strip() + "\n\n")
                 print(f"✅ Wrote: {out_path}")
-                # ✅ Rename extracted MKV track to <video_filename>.<src_lang>.srt for media servers
+
+                # ✅ Remove extracted MKV track SRT if translation succeeded
                 try:
                     if f.suffix.lower() == ".mkv" and working_srt != f and working_srt.exists():
-                        desired_src_name = f.with_suffix(f".{src_lang.lower()}.srt")
-                        if working_srt != desired_src_name:
-                            working_srt.rename(desired_src_name)
-                            if verbosity >= 1:
-                                print(f"🛈 Renamed source-language SRT to: {desired_src_name}")
+                        working_srt.unlink()
+                        if verbosity >= 1:
+                            print(f"🗑️ Deleted temporary source-language SRT: {working_srt}")
                 except Exception as e:
                     if verbosity >= 1:
-                        print(f"⚠️ Failed to rename source-language SRT: {e}")
+                        print(f"⚠️ Failed to delete temporary source-language SRT {working_srt}: {e}")
+
             except OSError as e:
                 print(f"❌ Failed to write output file {out_path}: {e}")
                 if out_path.exists():
