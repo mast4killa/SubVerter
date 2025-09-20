@@ -195,13 +195,19 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                 final_entries.append((e.idx, e.start, e.end, formatted))
 
             # --- Step 4: Write final SRT ---
-            print("💾 Step 4: Write final SRT to output folder")
-            if verbosity >= 1:
-                print(f"   🛈 Output directory: {Path('output').resolve()}")
+            print("💾 Step 4: Write final SRT to current folder")
+            out_path = Path(f"{working_srt.stem}.{cfg['target_language']}.srt")
 
-            out_dir = Path("output")  # INC‑021 ignored for now
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / f"{working_srt.stem}.{cfg['target_language']}.srt"
+            # If the target file already exists, rename it to .old
+            if out_path.exists():
+                backup_path = out_path.with_suffix(out_path.suffix + ".old")
+                try:
+                    out_path.rename(backup_path)
+                    if verbosity >= 1:
+                        print(f"⚠️ Existing file renamed to: {backup_path}")
+                except OSError as e:
+                    print(f"❌ Failed to rename existing file {out_path} to {backup_path}: {e}")
+                    return
 
             try:
                 with open(out_path, "w", encoding="utf-8", newline="\n") as w:
