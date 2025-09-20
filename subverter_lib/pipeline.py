@@ -32,7 +32,11 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
         files: Sequence of Path objects pointing to .srt or .mkv files.
         verbosity: Verbosity level (0 = normal output, higher = more debug info).
     """
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except Exception as e:
+        print(f"❌ Failed to load configuration: {e}")
+        return
 
     # Derive behaviour flags from config
     keep_browser_alive = bool(cfg.get("keep_browser_alive", False))
@@ -67,6 +71,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
             print(f"⚠️ Skipping missing file: {f}\n")
             continue
 
+        llm: LLMAdapter | None = None
         src_lang: str | None = None
         working_srt: Path | None = None
         cleanup_paths: list[Path] = []
@@ -97,12 +102,16 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                     print("   Update mkvextract_path in config or install MKVToolNix.\n")
                     continue
 
-                src_lang, track_id, srt_path, cleanup_paths = select_mkv_subtitle(
-                    mkv_path=f,
-                    mkvmerge_path=mkvmerge_path,
-                    mkvextract_path=mkvextract_path,
-                    allowed_src_langs_ordered=allowed_src_langs_ordered
-                )
+                try:
+                    src_lang, track_id, srt_path, cleanup_paths = select_mkv_subtitle(
+                        mkv_path=f,
+                        mkvmerge_path=mkvmerge_path,
+                        mkvextract_path=mkvextract_path,
+                        allowed_src_langs_ordered=allowed_src_langs_ordered
+                    )
+                except Exception as e:
+                    print(f"❌ Failed to select MKV subtitle: {e}")
+                    continue
 
                 if not src_lang or not srt_path:
                     print("❌ No usable subtitle track selected or extraction failed.\n")
@@ -120,7 +129,11 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
             if verbosity >= 1:
                 print(f"   🛈 Parsing SRT file: {working_srt}")
 
-            entries = parse_srt(working_srt)
+            try:
+                entries = parse_srt(working_srt)
+            except Exception as e:
+                print(f"❌ Failed to parse SRT file {working_srt}: {e}")
+                return
             if not entries:
                 print("❌ Failed to parse SRT or file is empty.")
                 return
@@ -138,21 +151,23 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                 model=cfg.get("model", "mistral"),
                 ollama_path=str(cfg.get("ollama_path")) if cfg.get("ollama_path") else None,
                 timeout_sec=cfg.get("timeout_sec", 120),
+                keep_browser_alive=keep_browser_alive
             ))
 
-            # Tell the adapter whether to keep a single Copilot browser session alive
-            llm._keep_browser_alive = keep_browser_alive
-
-            translations = translate_entries_with_context(
-                entries=entries,
-                src_lang=src_lang,
-                tgt_lang=cfg["target_language"],
-                llm=llm,
-                char_limit=cfg.get("char_limit", 2500),
-                verbosity=verbosity,
-                keep_browser_alive=keep_browser_alive,
-                summary_max_chars=summary_max_chars
-            )
+            try:
+                translations = translate_entries_with_context(
+                    entries=entries,
+                    src_lang=src_lang,
+                    tgt_lang=cfg["target_language"],
+                    llm=llm,
+                    char_limit=cfg.get("char_limit", 2500),
+                    verbosity=verbosity,
+                    keep_browser_alive=keep_browser_alive,
+                    summary_max_chars=summary_max_chars
+                )
+            except Exception as e:
+                print(f"❌ Translation step failed: {e}")
+                return
 
             if not translations:
                 print("❌ Translation failed.")
@@ -172,7 +187,11 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
 
             final_entries = []
             for e, t in zip(entries, translated_chunks):
-                formatted = reformat_subtitle_text(t, max_width=42, max_lines=2)
+                try:
+                    formatted = reformat_subtitle_text(t, max_width=42, max_lines=2)
+                except Exception as e:
+                    print(f"❌ Failed to reformat subtitle text: {e}")
+                    formatted = t
                 final_entries.append((e.idx, e.start, e.end, formatted))
 
             # --- Step 4: Write final SRT ---
@@ -180,21 +199,34 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
             if verbosity >= 1:
                 print(f"   🛈 Output directory: {Path('output').resolve()}")
 
-            out_dir = Path("output")
+            out_dir = Path("output")  # INC‑021 ignored for now
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / f"{working_srt.stem}.{cfg['target_language']}.srt"
-            with open(out_path, "w", encoding="utf-8", newline="\n") as w:
-                for i, (idx, start, end, text) in enumerate(final_entries, start=1):
-                    w.write(f"{idx}\n")
-                    w.write(f"{start} --> {end}\n")
-                    w.write(text.strip() + "\n\n")
 
-            print(f"✅ Wrote: {out_path}")
+            try:
+                with open(out_path, "w", encoding="utf-8", newline="\n") as w:
+                    for i, (idx, start, end, text) in enumerate(final_entries, start=1):
+                        w.write(f"{idx}\n")
+                        w.write(f"{start} --> {end}\n")
+                        w.write(text.strip() + "\n\n")
+                print(f"✅ Wrote: {out_path}")
+            except OSError as e:
+                print(f"❌ Failed to write output file {out_path}: {e}")
+                if out_path.exists():
+                    try:
+                        out_path.unlink()
+                        print(f"⚠️ Deleted incomplete file: {out_path}")
+                    except OSError as del_err:
+                        print(f"⚠️ Could not delete incomplete file {out_path}: {del_err}")
 
         finally:
             # Close persistent Copilot session if it was used
             try:
-                if getattr(llm, "_keep_browser_alive", False) and getattr(llm, "config", None):
+                if (
+                    llm
+                    and getattr(llm.config, "keep_browser_alive", False)
+                    and getattr(llm, "config", None)
+                ):
                     if llm.config.backend.lower() == "copilot_web":
                         if hasattr(llm, "_copilot_client") and llm._copilot_client:
                             llm._copilot_client.close()

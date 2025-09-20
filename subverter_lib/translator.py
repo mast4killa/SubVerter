@@ -22,6 +22,14 @@ from subverter_lib.lang_utils import normalize_text
 ENTRY_LABEL_RE = re.compile(r"^ENTRY\s+\d+:\s*", re.IGNORECASE)
 
 
+def split_on_entry_labels(text: str) -> list[str]:
+    """
+    Split translated text into parts based on ENTRY labels.
+    """
+    parts = re.split(r'(?=ENTRY \d+:)', text)
+    return [p.strip() for p in parts if p.strip()]
+
+
 def split_on_double_newline(text: str) -> List[str]:
     """
     Split text on double newlines into non-empty parts.
@@ -65,9 +73,7 @@ def validate_block_count(original: List[SRTEntry], translated_block_text: str) -
     orig_count = len(original)
 
     # Split on ENTRY labels instead of relying on blank lines
-    parts = re.split(r'(?=ENTRY \d+:)', translated_block_text)
-    parts = [p.strip() for p in parts if p.strip()]
-
+    parts = split_on_entry_labels(translated_block_text)
     return len(parts) == orig_count
 
 
@@ -105,8 +111,14 @@ def translate_block_fallback_per_entry(
             prev_context="", next_context="", verbosity=verbosity
         )
 
-        resp = llm.generate(prompt)
+        try:
+            resp = llm.generate(prompt)
+        except Exception as e:
+            print(f"❌ LLM generate call failed for entry {idx}/{len(entries)}: {e}")
+            return None
+
         if not resp:
+            print(f"❌ No output from LLM for entry {idx}/{len(entries)}")
             return None
         # Ensure single entry returned without extra splits
         lines = split_on_double_newline(resp)
@@ -142,13 +154,13 @@ def translate_entries_with_context(
                             (persistent mode), starting a new chat per block.
         summary_max_chars: Max characters to keep in rolling summary.
     """
-    # Helper: split on ENTRY labels instead of double newlines
-    def split_on_entry_labels(text: str) -> list[str]:
-        parts = re.split(r'(?=ENTRY \d+:)', text)
-        return [p.strip() for p in parts if p.strip()]
-
     # Build translation blocks based on char_limit
-    blocks = build_blocks(entries, char_limit)
+    try:
+        blocks = build_blocks(entries, char_limit)
+    except Exception as e:
+        print(f"❌ Failed to build translation blocks: {e}")
+        return None
+
     translations: List[str] = []
     rolling_summary = ""
 
@@ -159,7 +171,11 @@ def translate_entries_with_context(
     # If not, we'll create a fresh LLMAdapter per block
     for bi, (start, end) in enumerate(blocks, start=1):
         block_entries = entries[start: end + 1]
-        prev_ctx, next_ctx = context_slice(entries, start, end, prev_n=5, next_n=5)
+        try:
+            prev_ctx, next_ctx = context_slice(entries, start, end, prev_n=5, next_n=5)
+        except Exception as e:
+            print(f"❌ Failed to extract context for block {bi}/{len(blocks)}: {e}")
+            return None
 
         if verbosity >= 1:
             print(f"\n   🔹 Translating block {bi}/{len(blocks)} "
@@ -196,10 +212,18 @@ def translate_entries_with_context(
             llm_instance = llm
         else:
             # Fresh browser/session per block
+            if not getattr(llm, "config", None):
+                print(f"❌ LLMAdapter config is missing or invalid; cannot create new instance.")
+                return None
             llm_instance = LLMAdapter(llm.config)
 
         # Generate translation for the block
-        resp = llm_instance.generate(prompt, verbosity=verbosity)
+        try:
+            resp = llm_instance.generate(prompt, verbosity=verbosity)
+        except Exception as e:
+            print(f"❌ LLM generate call failed for block {bi}/{len(blocks)}: {e}")
+            return None
+
         if not resp:
             print(f"❌ Model returned no output for block {bi}/{len(blocks)}")
             return None
@@ -247,8 +271,19 @@ def translate_entries_with_context(
             )
 
             # Use the same llm_instance if keeping browser alive; otherwise, spin up a fresh one
-            summary_llm = llm_instance if keep_browser_alive else LLMAdapter(llm.config)
-            new_summary = summary_llm.generate(summary_prompt, verbosity=verbosity)
+            if keep_browser_alive:
+                summary_llm = llm_instance
+            else:
+                if not getattr(llm, "config", None):
+                    print(f"❌ LLMAdapter config is missing or invalid; cannot create new instance for summary.")
+                    return None
+                summary_llm = LLMAdapter(llm.config)
+
+            try:
+                new_summary = summary_llm.generate(summary_prompt, verbosity=verbosity)
+            except Exception as e:
+                print(f"❌ LLM generate call failed for rolling summary in block {bi}/{len(blocks)}: {e}")
+                return None
 
             if new_summary:
                 rolling_summary = new_summary.strip()

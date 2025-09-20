@@ -74,7 +74,14 @@ def detect_language_from_srt(path: Path, verbosity: int = 0) -> str | None:
                 print(f"      ↳ Sample text: {sample[:200]}{'...' if len(sample) > 200 else ''}")
             print(f"   🛈 Detected language: {lang}")
         return lang
+    except FileNotFoundError:
+        print(f"❌ SRT file not found: {path}")
+        return None
+    except UnicodeDecodeError as e:
+        print(f"❌ Cannot decode {path.name} as UTF-8: {e}")
+        return None
     except Exception as e:
+        # Catch langdetect-specific or other unexpected errors
         print(f"❌ Language detection failed for {path.name}: {e}")
         return None
 
@@ -91,8 +98,18 @@ def parse_srt(path: Path, verbosity: int = 0) -> List[SRTEntry]:
         List of SRTEntry objects.
     """
     entries: List[SRTEntry] = []
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        raw = f.read()
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        print(f"❌ SRT file not found: {path}")
+        return []
+    except UnicodeDecodeError as e:
+        print(f"❌ Cannot decode {path.name} as UTF-8: {e}")
+        return []
+    except OSError as e:
+        print(f"❌ Failed to read SRT file {path}: {e}")
+        return []
 
     # Normalize line endings
     raw = raw.replace("\r\n", "\n").replace("\r", "\n")
@@ -143,15 +160,6 @@ def parse_srt(path: Path, verbosity: int = 0) -> List[SRTEntry]:
                 print("      ...")
 
     return entries
-
-
-def strip_inline_tags(text: str) -> str:
-    """
-    Optionally strip or mask inline tags before translation.
-
-    Currently returns the text unchanged.
-    """
-    return text
 
 
 def join_entries_text(entries: List[SRTEntry]) -> str:

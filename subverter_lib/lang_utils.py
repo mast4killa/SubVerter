@@ -70,7 +70,7 @@ def filter_allowed_candidates(
     ]
 
 
-def normalize_text(text) -> str:
+def normalize_text(text: str | list[str] | None) -> str:
     """
     Ensure any subtitle entry text is flattened into a single clean string.
 
@@ -81,7 +81,7 @@ def normalize_text(text) -> str:
     if isinstance(text, list):
         text = " ".join(map(str, text))
     else:
-        text = str(text)
+        text = str(text) if text is not None else ""
 
     # Replace newlines with spaces, then collapse multiple spaces
     return " ".join(text.split())

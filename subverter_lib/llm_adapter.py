@@ -36,6 +36,7 @@ class LLMConfig:
     model: str
     ollama_path: Optional[str] = None
     timeout_sec: int = 120
+    keep_browser_alive: bool = False
 
 
 class LLMAdapter:
@@ -145,8 +146,8 @@ class LLMAdapter:
 
         Current behaviour:
         - Always sends a full-context prompt (rolling summary + local context).
-        - If self._keep_browser_alive is True: reuse a persistent CopilotClient/browser session
-        across multiple calls (launch once), but start a NEW chat for each call.
+        - If self.config.keep_browser_alive is True: reuse a persistent CopilotClient/browser session
+        across multiple calls (launch once), but start a NEW chat for each call (except first).
         - If False: use one-shot mode (launch, send, close each time).
         """
         try:
@@ -162,34 +163,56 @@ class LLMAdapter:
             preview = "\n".join(lines[:5] + (["..."] if len(lines) > 10 else []) + lines[-5:])
             print("\n      🛈 [LLMAdapter] Prompt preview:\n" + preview + "\n")
 
-        # Check if we're in persistent browser mode (set in run_pipeline)
-        keep_alive = getattr(self, "_keep_browser_alive", False)
+        # Check if we're in persistent browser mode (flag set in run_pipeline)
+        keep_alive = getattr(self.config, "keep_browser_alive", False)
 
         try:
             if keep_alive:
+                # Persistent mode: reuse browser session, start new topic each time (except first)
+                first_block = False
                 if not hasattr(self, "_copilot_client") or self._copilot_client is None:
-                    self._copilot_client = CopilotClient(headless=(verbosity < 2))
-                    self._copilot_client.launch(verbosity=verbosity)
-                    first_block = True
-                else:
-                    first_block = False
+                    try:
+                        self._copilot_client = CopilotClient(headless=(verbosity < 2))
+                        self._copilot_client.launch(verbosity=verbosity)
+                        first_block = True
+                    except Exception as e:
+                        print(f"❌ Failed to launch persistent CopilotClient: {e}")
+                        return None
 
                 if not first_block:
-                    self._copilot_client.start_new_topic(verbosity=verbosity)
+                    try:
+                        self._copilot_client.start_new_topic(verbosity=verbosity)
+                    except Exception as e:
+                        print(f"❌ Failed to start new topic: {e}")
+                        return None
 
-                resp = self._copilot_client.send_prompt(
-                    prompt_text=prompt,
-                    timeout_sec=self.config.timeout_sec,
-                    verbosity=verbosity
-                )
+                try:
+                    resp = self._copilot_client.send_prompt(
+                        prompt_text=prompt,
+                        timeout_sec=self.config.timeout_sec,
+                        verbosity=verbosity
+                    )
+                except Exception as e:
+                    print(f"❌ Failed to send prompt: {e}")
+                    return None
+
             else:
                 # One-shot mode: launch, send, close each time
-                client = CopilotClient(headless=(verbosity < 2))
-                resp = client.run_prompt(
-                    prompt,
-                    timeout_sec=self.config.timeout_sec,
-                    verbosity=verbosity
-                )
+                try:
+                    client = CopilotClient(headless=(verbosity < 2))
+                    resp = client.run_prompt(
+                        prompt,
+                        timeout_sec=self.config.timeout_sec,
+                        verbosity=verbosity
+                    )
+                except Exception as e:
+                    print(f"❌ Failed to run prompt in one-shot mode: {e}")
+                    return None
+                finally:
+                    try:
+                        client.close()
+                    except Exception as e:
+                        print(f"⚠️ Failed to close one-shot CopilotClient: {e}")
 
             if verbosity >= 3 and resp:
                 print("      🛈 [LLMAdapter] Full raw output from Copilot Web:\n" + resp + "\n")

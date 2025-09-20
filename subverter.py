@@ -14,9 +14,9 @@ CLI entry point — minimal logic here:
 # 📂 Project Structure
 # ============================================================
 subverter/
-├── subverter.py                # CLI entry point — just parses args & dispatches
+├── subverter.py                 # CLI entry point — just parses args & dispatches
 │
-├── subverter_lib/                         # All reusable logic lives here
+├── subverter_lib/               # All reusable logic lives here
 │   ├── __init__.py              # Empty for now (marks this as a package)
 │   ├── config_manager.py        # Load/save/validate config.json
 │   ├── installers.py            # install() / uninstall() registry helpers
@@ -31,7 +31,7 @@ subverter/
 │
 ├── cfg/
 │   └── config.json              # User-editable configuration
-│   └── copilot_storage.json     # TODO: I still have to describe this one!! HELP ME
+│   └── copilot_storage.json     # Internal cache for AI-related state and progress
 │
 ├── requirements.txt             # Python dependencies
 ├── README.md                    # Project documentation
@@ -60,10 +60,22 @@ from subverter_lib.pipeline import run_pipeline
 
 def main() -> None:
     """
-    Parse command-line arguments and run the appropriate action.
+    Entry point for SubVerter CLI.
+
+    Parses command-line arguments and dispatches to appropriate actions:
+    - Installs or uninstalls context menu entries.
+    - Runs subtitle translation pipeline on provided files.
+
+    Arguments:
+        None (arguments are parsed from sys.argv)
+
+    Returns:
+        None (exits with status code 0 on success, non-zero on failure)
     """
     parser = argparse.ArgumentParser(
-        description="SubVerter — Context-aware subtitle translation using AI"
+        prog="SubVerter",
+        description="SubVerter — Context-aware subtitle translation using AI",
+        epilog="Example: SubVerter movie.srt -vv"
     )
     parser.add_argument(
         "files",
@@ -71,16 +83,19 @@ def main() -> None:
         type=Path,
         help="One or more .srt or .mkv files to process"
     )
-    parser.add_argument(
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--install",
         action="store_true",
-        help="Install right-click context menu entry"
+        help="Install dependencies, create/validate config, and add right‑click menu entries"
     )
-    parser.add_argument(
+    group.add_argument(
         "--uninstall",
         action="store_true",
         help="Uninstall right-click context menu entry"
     )
+
     parser.add_argument(
         "-v", "--verbose",
         action="count",
@@ -90,20 +105,27 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.install:
-        install()
-        return
-    if args.uninstall:
-        uninstall()
-        return
-    if not args.files:
-        parser.print_help()
-        return
+    # Clamp verbosity to max 3
+    args.verbose = min(args.verbose, 3)
 
-    # Pass verbosity level into the pipeline
-    run_pipeline(args.files, verbosity=args.verbose)
+    try:
+        if args.install:
+            install()
+            return
+        if args.uninstall:
+            uninstall()
+            return
+        if not args.files:
+            parser.print_help()
+            print("\n❌ No input files provided. Please specify one or more .srt or .mkv files.")
+            raise SystemExit(1)
 
+        run_pipeline(args.files, verbosity=args.verbose)
+        print("\n✅ Done. You can close this window.")
+
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()
-    print("\n✅ Done. You can close this window.")

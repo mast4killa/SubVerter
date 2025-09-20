@@ -14,7 +14,7 @@ import random
 from pathlib import Path
 from typing import Optional
 
-from playwright.sync_api import sync_playwright, Page  # ✅ sync API
+from playwright.sync_api import TimeoutError, sync_playwright, Page  # ✅ sync API
 
 COPILOT_URL = "https://copilot.microsoft.com"
 STORAGE_FILE = Path(__file__).parent.parent / "cfg" / "copilot_storage.json"
@@ -45,14 +45,19 @@ class CopilotClient:
         print("   💬 Wait until the Copilot chat interface is fully loaded.")
         input("   ⏳ Press Enter here once you're logged in...")
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto(COPILOT_URL)
-            input("   ✅ Press Enter again to save session and close browser...")
-            context.storage_state(path=str(self.storage_file))
-            browser.close()
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=False)
+                context = browser.new_context()
+                page = context.new_page()
+                page.goto(COPILOT_URL)
+                input("   ✅ Press Enter again to save session and close browser...")
+                context.storage_state(path=str(self.storage_file))
+                browser.close()
+        except Exception as e:
+            print(f"\n❌ Failed to complete login flow: {e}")
+            print("   ⚠️ Try again or check your browser/network setup.")
+            return
 
         print(f"\n💾 Session saved to: {self.storage_file}")
 
@@ -72,16 +77,22 @@ class CopilotClient:
         if self._browser:
             return  # already launched
 
-        self._p = sync_playwright().start()
-        self._browser = self._p.chromium.launch(headless=self.headless)
-        self._context = self._browser.new_context(storage_state=str(self.storage_file))
-        self._page = self._context.new_page()
-        if verbosity >= 3:
-            print(f"➡️ Navigating to {COPILOT_URL}")
-        self._page.goto(COPILOT_URL)
-        if verbosity >= 3:
-            print("⏳ Waiting for chat textarea…")
-        self._page.wait_for_selector(PROMPT_SELECTOR, timeout=15000)
+        try:
+            self._p = sync_playwright().start()
+            self._browser = self._p.chromium.launch(headless=self.headless)
+            self._context = self._browser.new_context(storage_state=str(self.storage_file))
+            self._page = self._context.new_page()
+            if verbosity >= 3:
+                print(f"➡️ Navigating to {COPILOT_URL}")
+            self._page.goto(COPILOT_URL)
+            if verbosity >= 3:
+                print("⏳ Waiting for chat textarea…")
+            self._page.wait_for_selector(PROMPT_SELECTOR, timeout=15000)
+        except Exception as e:
+            print(f"\n❌ Failed to launch Copilot browser: {e}")
+            print("   ⚠️ Check your session file, network, or Playwright setup.")
+            self.close()
+            raise
 
         # Switch to Smart mode once per session
         if verbosity >= 3:
@@ -133,9 +144,16 @@ class CopilotClient:
 
         if verbosity >= 3:
             print("⏳ Waiting for assistant's reply container…")
-        self._page.wait_for_selector('div[data-content="ai-message"]', timeout=timeout_sec * 1000)
+        try:
+            self._page.wait_for_selector('div[data-content="ai-message"]', timeout=timeout_sec * 1000)
+        except TimeoutError:
+            print("⚠️ Timed out waiting for assistant reply.")
+            return None
 
         messages = self._page.query_selector_all('div[data-content="ai-message"]')
+        if not messages:
+            print("⚠️ No assistant reply received or found.")
+            return None
         last_msg = messages[-1]
 
         if verbosity >= 3:
@@ -165,10 +183,16 @@ class CopilotClient:
         """
         Close browser and Playwright (persistent browser mode).
         """
-        if self._browser:
-            self._browser.close()
-        if self._p:
-            self._p.stop()
+        try:
+            if self._browser:
+                self._browser.close()
+        except Exception as e:
+            print(f"⚠️ Failed to close browser: {e}")
+        try:
+            if self._p:
+                self._p.stop()
+        except Exception as e:
+            print(f"⚠️ Failed to stop Playwright: {e}")
         self._browser = None
         self._context = None
         self._page = None
@@ -193,75 +217,86 @@ class CopilotClient:
             headless_mode = False
             print("🪟 Verbose mode: launching visible browser window for debugging…")
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless_mode)
-            context = browser.new_context(storage_state=str(self.storage_file))
-            page = context.new_page()
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=headless_mode)
+                context = browser.new_context(storage_state=str(self.storage_file))
+                page = context.new_page()
 
-            if verbosity >= 3:
-                print(f"➡️ Navigating to {COPILOT_URL}")
-            page.goto(COPILOT_URL)
+                if verbosity >= 3:
+                    print(f"➡️ Navigating to {COPILOT_URL}")
+                page.goto(COPILOT_URL)
 
-            if verbosity >= 3:
-                print("⏳ Waiting for chat textarea…")
-            page.wait_for_selector(PROMPT_SELECTOR, timeout=15000)
+                if verbosity >= 3:
+                    print("⏳ Waiting for chat textarea…")
+                page.wait_for_selector(PROMPT_SELECTOR, timeout=15000)
 
-            # Small human-like pause before interacting
-            human_delay(0.8, 1.5)
+                # Small human-like pause before interacting
+                human_delay(0.8, 1.5)
 
-            # 1) Switch to Smart mode (adjust sequence to match actual UI tab order)
-            if verbosity >= 3:
-                print("🧠 Switching to Smart (GPT‑5) mode…")
-            human_submit(
-                page,
-                "",  # no intro text
-                "",  # no subtitles text
-                "Tab,Tab,Enter,ArrowDown,ArrowDown,Enter,Shift+Tab,Shift+Tab"
-            )
-            human_delay(0.5, 1.2)
+                # 1) Switch to Smart mode (adjust sequence to match actual UI tab order)
+                if verbosity >= 3:
+                    print("🧠 Switching to Smart (GPT‑5) mode…")
+                human_submit(
+                    page,
+                    "",  # no intro text
+                    "",  # no subtitles text
+                    "Tab,Tab,Enter,ArrowDown,ArrowDown,Enter,Shift+Tab,Shift+Tab"
+                )
+                human_delay(0.5, 1.2)
 
-            # 2) Enter prompt and submit via keyboard
-            if verbosity >= 3:
-                print(f"⌨️ Entering prompt via human_submit: {prompt_text!r}")
-            human_submit(
-                page,
-                "",              # intro_text
-                prompt_text,     # subtitles_text
-                "Tab,Tab,Tab,Tab,Enter"  # navigate to submit button and press Enter
-            )
+                # 2) Enter prompt and submit via keyboard
+                if verbosity >= 3:
+                    print(f"⌨️ Entering prompt via human_submit: {prompt_text!r}")
+                human_submit(
+                    page,
+                    "",              # intro_text
+                    prompt_text,     # subtitles_text
+                    "Tab,Tab,Tab,Tab,Enter"  # navigate to submit button and press Enter
+                )
 
-            if verbosity >= 3:
-                print("⏳ Waiting for assistant's reply container…")
-            page.wait_for_selector('div[data-content="ai-message"]', timeout=timeout_sec * 1000)
+                if verbosity >= 3:
+                    print("⏳ Waiting for assistant's reply container…")
+                page.wait_for_selector('div[data-content="ai-message"]', timeout=timeout_sec * 1000)
 
-            messages = page.query_selector_all('div[data-content="ai-message"]')
-            last_msg = messages[-1]
+                messages = page.query_selector_all('div[data-content="ai-message"]')
+                if not messages:
+                    print("⚠️ No assistant reply received or found.")
+                    return None
+                last_msg = messages[-1]
 
-            if verbosity >= 3:
-                print("⏳ Waiting for reply content to stabilise…")
+                if verbosity >= 3:
+                    print("⏳ Waiting for reply content to stabilise…")
 
-            stable_count = 0
-            last_html = ""
-            start_time = time.time()
-            while time.time() - start_time < timeout_sec:
-                current_html = last_msg.inner_html()
-                if current_html == last_html:
-                    stable_count += 1
-                else:
-                    stable_count = 0
-                    last_html = current_html
-                if stable_count >= 2:
-                    break
-                time.sleep(1)
+                stable_count = 0
+                last_html = ""
+                start_time = time.time()
+                while time.time() - start_time < timeout_sec:
+                    current_html = last_msg.inner_html()
+                    if current_html == last_html:
+                        stable_count += 1
+                    else:
+                        stable_count = 0
+                        last_html = current_html
+                    if stable_count >= 2:
+                        break
+                    time.sleep(1)
 
-            spans = last_msg.query_selector_all("span.font-ligatures-none.whitespace-pre-wrap")
-            texts = [span.inner_text().strip() for span in spans if span.inner_text().strip()]
-            if verbosity >= 3:
-                print(f"📄 Found {len(texts)} spans in assistant's reply.")
+                spans = last_msg.query_selector_all("span.font-ligatures-none.whitespace-pre-wrap")
+                texts = [span.inner_text().strip() for span in spans if span.inner_text().strip()]
+                if verbosity >= 3:
+                    print(f"📄 Found {len(texts)} spans in assistant's reply.")
 
-            response_text = "\n".join(texts)
-            browser.close()
-            return response_text.strip() if response_text else None
+                response_text = "\n".join(texts)
+                browser.close()
+                return response_text.strip() if response_text else None
+        except TimeoutError:
+            print("⚠️ Timed out waiting for assistant reply.")
+            return None
+        except Exception as e:
+            print(f"\n❌ Failed to run prompt: {e}")
+            print("   ⚠️ Check your session file, network, or Playwright setup.")
+            return None
 
 
 # ================
@@ -290,9 +325,9 @@ def human_delay(short_range=(0.3, 3.0), long_range=(3.0, 8.0), long_chance=0.1):
     time.sleep(delay)
 
 
-# ==============================
-# HUMAN-LIKE MOUSE CLICK (sync)
-# ==============================
+# ======================
+# HUMAN-LIKE MOUSE CLICK
+# ======================
 def human_click(page: Page, selector: str, move_steps=25):
     """
     Simulate a human-like mouse click:
@@ -304,10 +339,16 @@ def human_click(page: Page, selector: str, move_steps=25):
     - selector: CSS selector for the element to click
     - move_steps: number of interpolation steps for the glide
     """
-    element = page.query_selector(selector)
-    bounds = element.bounding_box()
-    if not bounds:
-        raise ValueError(f"Element {selector} not found or not visible")
+    try:
+        element = page.query_selector(selector)
+        if not element:
+            raise ValueError(f"Element {selector} not found on page.")
+        bounds = element.bounding_box()
+        if not bounds:
+            raise ValueError(f"Element {selector} is not visible or has no bounding box.")
+    except Exception as e:
+        print(f"❌ Failed to locate or prepare element for click: {e}")
+        return
 
     # Random click point inside element (±20% from center)
     target_x = bounds["x"] + bounds["width"] / 2 + random.uniform(-bounds["width"] * 0.2, bounds["width"] * 0.2)
@@ -349,15 +390,9 @@ def human_click(page: Page, selector: str, move_steps=25):
         time.sleep(random.uniform(0.01, 0.03))
 
 
-# ==============================
-# FLEXIBLE HUMAN SUBMIT (sync)
-# ==============================
-
-# Selector for the Copilot prompt text box.
-# If Microsoft changes the DOM, update this in ONE place.
-# Tip: You can inspect the page in your browser to find the new selector.
-PROMPT_SELECTOR = "textarea#userInput"
-
+# =====================
+# FLEXIBLE HUMAN SUBMIT
+# =====================
 def human_submit(page: Page, intro_text: str, subtitles_text: str, sequence: str):
     """
     Paste intro + subtitles into the prompt box, then execute a sequence of key presses.
@@ -369,15 +404,24 @@ def human_submit(page: Page, intro_text: str, subtitles_text: str, sequence: str
                 Example: "Tab,Tab,Enter,ArrowDown,Enter"
                 Valid key names: https://playwright.dev/docs/api/class-keyboard#keyboard-press
     """
-    # Ensure prompt box is focused (check by selector)
-    is_focused = page.evaluate(f"""
-        document.activeElement === document.querySelector("{PROMPT_SELECTOR}")
-    """)
-    if not is_focused:
-        page.focus(PROMPT_SELECTOR)
+    try:
+        # Ensure prompt box is focused (check by selector)
+        is_focused = page.evaluate(f"""
+            document.activeElement === document.querySelector("{PROMPT_SELECTOR}")
+        """)
+        if not is_focused:
+            page.focus(PROMPT_SELECTOR)
+    except Exception as e:
+        print(f"❌ Failed to focus prompt box: {e}")
+        return
 
-    # Paste intro + subtitles
-    page.fill(PROMPT_SELECTOR, intro_text + "\n" + subtitles_text)
+    try:
+        # Paste intro + subtitles
+        page.fill(PROMPT_SELECTOR, intro_text + "\n" + subtitles_text)
+    except Exception as e:
+        print(f"❌ Failed to fill prompt box: {e}")
+        return
+
     human_delay(0.8, 2.0)
 
     # Execute sequence exactly as given

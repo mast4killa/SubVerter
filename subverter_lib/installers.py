@@ -45,11 +45,18 @@ def install() -> None:
 
     if req_file.exists():
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
-                check=True,
+                capture_output=True,
+                text=True
             )
-            print("   ✅ Dependencies installed from requirements.txt")
+            if result.returncode == 0:
+                print("   ✅ Dependencies installed from requirements.txt")
+            else:
+                print("   ❌ Failed to install dependencies.")
+                print("      stdout:", result.stdout.strip())
+                print("      stderr:", result.stderr.strip())
+                return
         except subprocess.CalledProcessError:
             print("   ❌ Failed to install dependencies. Please run manually:")
             print(f"      pip install -r {req_file}")
@@ -57,50 +64,65 @@ def install() -> None:
     else:
         print("   ⚠️ requirements.txt not found. Skipping dependency installation.")
 
-    # ------------------------------
+    # --------------------------
     # Playwright browser install
-    # ------------------------------
+    # --------------------------
     print("\n🌐 Installing Playwright Chromium browser for Copilot automation...")
     try:
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
-            check=True,
+            capture_output=True,
+            text=True
         )
-        print("   ✅ Playwright Chromium installed")
+        if result.returncode == 0:
+            print("   ✅ Playwright Chromium installed")
+        else:
+            print("   ❌ Failed to install Playwright browser.")
+            print("      stdout:", result.stdout.strip())
+            print("      stderr:", result.stderr.strip())
     except subprocess.CalledProcessError:
         print("   ❌ Failed to install Playwright browser. Run manually:")
         print("      playwright install chromium")
 
-    # ------------------------------
+    # --------------
     # Registry setup
-    # ------------------------------
+    # --------------
+    if sys.platform != "win32":
+        print("   ⚠️ Registry setup skipped — SubVerter only supports Windows.")
+        return
     print("\n🧠 Adding context menu entries to registry (current user only)...")
 
-    create_default_config()
-    cfg = load_config()
+    try:
+        create_default_config()
+        cfg = load_config()
+        validate_config(cfg)
+    except Exception as e:
+        print(f"❌ Config setup failed: {e}")
+        print("   ⚠️ Registry setup aborted due to config error.")
+        return
 
     extensions = [".srt", ".mkv"]
     for ext in extensions:
         key_path = f"Software\\Classes\\SystemFileAssociations\\{ext}\\shell\\SubVerter"
         cmd_key_path = key_path + r"\\command"
 
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            winreg.SetValueEx(key, None, 0, winreg.REG_SZ, "Translate with SubVerter")
-            print(f"   📝 Created key: HKCU\\{key_path}")
-            print("      ↳ Set default value: 'SubVerter'")
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                winreg.SetValueEx(key, None, 0, winreg.REG_SZ, "Translate with SubVerter")
+                print(f"   📝 Created key: HKCU\\{key_path}")
+                print("      ↳ Set default value: 'SubVerter'")
+        except OSError as e:
+            print(f"   ❌ Failed to create registry key {key_path}: {e}")
 
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, cmd_key_path) as key:
-            main_script = Path(__file__).parent.parent / "subverter.py"
-            command = f'cmd /k py "{main_script}" "%1"'
-            winreg.SetValueEx(key, None, 0, winreg.REG_SZ, command)
-            print(f"   📝 Created key: HKCU\\{cmd_key_path}")
-            print(f"      ↳ Set default value: {command}")
-
-    # ------------------------------
-    # Config validation
-    # ------------------------------
-    print("\n⚙️ Config setup")
-    validate_config(cfg)
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, cmd_key_path) as key:
+                main_script = Path(__file__).parent.parent / "subverter.py"
+                command = f'cmd /k py "{main_script}" "%1"'
+                winreg.SetValueEx(key, None, 0, winreg.REG_SZ, command)
+                print(f"   📝 Created key: HKCU\\{cmd_key_path}")
+                print(f"      ↳ Set default value: {command}")
+        except OSError as e:
+            print(f"   ❌ Failed to create registry key {cmd_key_path}: {e}")
 
     # ------------------------------
     # Copilot Web login (if needed)
@@ -157,13 +179,13 @@ def uninstall() -> None:
         try:
             winreg.DeleteKey(winreg.HKEY_CURRENT_USER, cmd_key)
             print(f"   🗑️ Deleted key: HKCU\\{cmd_key}")
-        except FileNotFoundError:
-            print(f"   ⚠️ Key not found: HKCU\\{cmd_key}")
+        except OSError as e:
+            print(f"   ⚠️ Could not delete key: HKCU\\{cmd_key} — {e}")
 
         try:
             winreg.DeleteKey(winreg.HKEY_CURRENT_USER, main_key)
             print(f"   🗑️ Deleted key: HKCU\\{main_key}")
-        except FileNotFoundError:
-            print(f"   ⚠️ Key not found: HKCU\\{main_key}")
+        except OSError as e:
+            print(f"   ⚠️ Could not delete key: HKCU\\{main_key} — {e}")
 
     print("\n✅ Uninstallation complete — registry entries removed for .srt and .mkv\n")

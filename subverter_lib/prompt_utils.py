@@ -12,9 +12,6 @@ from typing import List
 from subverter_lib.srt_utils import SRTEntry
 
 
-from typing import List
-from subverter_lib.srt_utils import SRTEntry
-
 def build_translation_prompt(
     src_lang: str,
     tgt_lang: str,
