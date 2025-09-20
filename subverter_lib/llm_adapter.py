@@ -172,7 +172,7 @@ class LLMAdapter:
                 first_block = False
                 if not hasattr(self, "_copilot_client") or self._copilot_client is None:
                     try:
-                        self._copilot_client = CopilotClient(headless=(verbosity < 2))
+                        self._copilot_client = CopilotClient(headless=False)
                         self._copilot_client.launch(verbosity=verbosity)
                         first_block = True
                     except Exception as e:
@@ -199,7 +199,7 @@ class LLMAdapter:
             else:
                 # One-shot mode: launch, send, close each time
                 try:
-                    client = CopilotClient(headless=(verbosity < 2))
+                    client = CopilotClient(headless=False)
                     resp = client.run_prompt(
                         prompt,
                         timeout_sec=self.config.timeout_sec,
