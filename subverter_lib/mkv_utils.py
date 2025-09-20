@@ -24,6 +24,7 @@ from subprocess import CalledProcessError
 from json import JSONDecodeError
 
 
+# probe_mkv_subtitles() — returns tagged tracks and IDs of untagged tracks
 def probe_mkv_subtitles(
     mkvmerge_path: Path,
     mkv_path: Path
@@ -313,6 +314,7 @@ def choose_mkv_subtitle_interactive(
     return selected["lang_norm"], selected["id"], selected["srt_path"], cleanup_paths
 
 
+# select_mkv_subtitle() — high-level strategy with auto/interactive selection
 def select_mkv_subtitle(
     mkv_path: Path,
     mkvmerge_path: Path,

@@ -12,6 +12,7 @@ Provides:
 from typing import List
 
 
+# soft_wrap() — wraps without breaking words, respects max width
 def soft_wrap(text: str, width: int) -> List[str]:
     """
     Wrap text into lines without breaking words, respecting a maximum width.

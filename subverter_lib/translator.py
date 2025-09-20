@@ -130,6 +130,7 @@ def translate_block_fallback_per_entry(
     return "\n\n".join(out_parts)
 
 
+# translate_entries_with_context() — main translation loop with fallback and rolling summary
 def translate_entries_with_context(
     entries: List[SRTEntry],
     src_lang: str,

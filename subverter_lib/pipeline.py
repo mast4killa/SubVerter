@@ -45,7 +45,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
     if verbosity >= 1:
         print(f"   🧠 keep_browser_alive={keep_browser_alive} | summary_max_chars={summary_max_chars}")
 
-    # Build runtime allowlist without target language
+    # Build allowed source language list, excluding the target language
     tgt_lang = cfg["target_language"].lower()
     allowed_src_langs_ordered = [
         lang.lower()
@@ -123,7 +123,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                 print(f"⚠️ Unsupported file type: {f.name} (.{f.suffix.lstrip('.')}) — skipping.\n")
                 continue
 
-            # --- Step 1: Parse and block build ---
+            # Step 1: Parse SRT into structured entries
             print(f"\n🎯 Target language: {cfg['target_language']}")
             print("➡️ Step 1: Parse and block build")
             if verbosity >= 1:
@@ -141,7 +141,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
             if verbosity >= 1:
                 print(f"   🛈 Parsed {len(entries)} subtitle entries.")
 
-            # --- Step 2: Send to model backend ---
+            # Step 2: Translate entries in context-aware blocks
             print("➡️ Step 2: Send to model backend")
             if verbosity >= 1:
                 print(f"   🛈 Backend: {cfg.get('backend', 'ollama')} | Model: {cfg.get('model', 'mistral')}")
@@ -173,7 +173,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                 print("❌ Translation failed.")
                 return
 
-            # --- Step 3: Validate and reformat ---
+            # Step 3: Reformat translated text to fit subtitle constraints
             print("➡️ Step 3: Validate and reformat")
 
             translated_text = "\n\n".join(translations)
@@ -194,7 +194,7 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                     formatted = t
                 final_entries.append((e.idx, e.start, e.end, formatted))
 
-            # --- Step 4: Write final SRT ---
+            # Step 4: Write final SRT next to input file
             print("💾 Step 4: Write final SRT next to input file")
 
             # Decide base name:

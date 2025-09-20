@@ -10,7 +10,7 @@ Provides:
 - Filtering of candidate language detections against an allowed list.
 """
 
-# Common ISO 639-2 to ISO 639-1 language code mapping
+# ISO639_MAP — maps common 3-letter codes to 2-letter ISO 639-1 codes
 ISO639_MAP: dict[str, str] = {
     "eng": "en", "fra": "fr", "fre": "fr", "deu": "de", "ger": "de", "spa": "es",
     "ita": "it", "nld": "nl", "dut": "nl", "por": "pt", "rus": "ru", "jpn": "ja",

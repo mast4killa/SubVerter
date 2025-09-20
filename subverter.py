@@ -1,3 +1,7 @@
+# CLI entry point — minimal logic:
+# - Parses command-line args
+# - Dispatches to installers or main pipeline
+
 #!/usr/bin/env python3
 from __future__ import annotations
 

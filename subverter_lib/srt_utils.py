@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
+# SRT_TIME_RE — matches "HH:MM:SS,mmm --> HH:MM:SS,mmm" timestamp lines
 SRT_TIME_RE = re.compile(
     r"^\s*(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})\s*$"
 )

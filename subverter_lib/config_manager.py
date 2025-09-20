@@ -20,7 +20,7 @@ from subverter_lib.lang_utils import normalize_lang_code
 # Path to the configuration file (stored in cfg/ at project root)
 CONFIG_PATH = Path(__file__).parent.parent / "cfg" / "config.json"
 
-# Default configuration values
+# DEFAULT_CONFIG defines all required keys with safe defaults
 DEFAULT_CONFIG: dict[str, Any] = {
     # Keep one browser window open and start a new chat per block (faster).
     # If false, launch and close a browser window for each block (slowest, but equivalent results).

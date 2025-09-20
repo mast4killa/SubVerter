@@ -47,6 +47,7 @@ class LLMAdapter:
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
 
+    # Backend routing — add new _call_<backend>() methods to extend support
     def generate(self, prompt: str, verbosity: int = 0) -> Optional[str]:
         """
         Send a prompt to the configured backend and return the generated text.
