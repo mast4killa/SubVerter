@@ -5,7 +5,7 @@
 
 ## Overview
 SubVerter is a command‑line tool for translating `.srt` and `.mkv` subtitles with high fidelity.  
-It uses **context‑aware prompts** and supports multiple backends, including **Copilot Web** (via Playwright automation) and **Ollama** (local models).  
+Uses **context‑aware prompts** and supports multiple backends, including **Copilot Web** (via Playwright automation) and **Ollama** (local models).   
 The pipeline preserves subtitle structure, inline tags, and timing, while leveraging rolling summaries and surrounding context for better translation quality.
 
 ---
@@ -19,26 +19,29 @@ The pipeline preserves subtitle structure, inline tags, and timing, while levera
 - **Configurable**: All settings in `cfg/config.json` — paths, languages, backend, limits.
 - **Windows integration**: Optional right‑click context menu for `.srt` and `.mkv`.
 
+### ✅ Tested & Supported
+- **Backends**:
+  - **Copilot Web** → fully tested and works reliably.
+  - **Mistral** → functional, but current model struggles to follow the prompt accurately.
+- **Operating systems**:
+  - Only tested and supported on **Windows**.
+
+
 ---
 
-## Installation
-1. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   Requirements:
-   - `langdetect`
-   - `playwright>=1.47.0`
+## Installation / Uninstallation (Windows only)
 
-2. **Install Playwright browser**:
-   ```bash
-   playwright install chromium
-   ```
+**Install**  
+```bash
+python subverter.py --install
+```  
+Adds right‑click menu for `.srt`/`.mkv`, installs dependencies, default config, and Playwright browser.
 
-3. **Run installer** (Windows only for context menu integration):
-   ```bash
-   python subverter.py --install
-   ```
+**Uninstall**  
+```bash
+python subverter.py --uninstall
+```  
+Removes right‑click menu (keeps config and dependencies).
 
 ---
 
@@ -47,12 +50,6 @@ Translate one or more files:
 ```bash
 python subverter.py movie.srt
 python subverter.py episode.mkv -vv
-```
-
-Install/uninstall context menu entries:
-```bash
-python subverter.py --install
-python subverter.py --uninstall
 ```
 
 Verbosity levels:
