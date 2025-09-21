@@ -261,6 +261,14 @@ def translate_entries_with_context(
         # Store the translated block
         translations.append(resp.strip())
 
+        # --- Progress bar (always shown, even if verbosity == 0) ---
+        total_blocks = len(blocks)
+        completed = "#" * bi
+        remaining = "_" * (total_blocks - bi)
+        bar = f"[{completed}{remaining}]"
+        print(f"\rTranslating {bar}", end="", flush=True)
+        # ------------------------------------------------------------
+
         # Update rolling summary for next block
         if bi < len(blocks):
             recent_text = " ".join(normalize_text(e.text) for e in block_entries)
@@ -296,4 +304,6 @@ def translate_entries_with_context(
             if verbosity >= 2:
                 print(f"      ↳ Updated rolling summary length: {len(rolling_summary)} chars")
 
+    # Ensure the progress bar line ends cleanly
+    print()
     return translations
