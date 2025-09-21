@@ -117,7 +117,7 @@ def install() -> None:
         try:
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, cmd_key_path) as key:
                 main_script = Path(__file__).parent.parent / "subverter.py"
-                command = f'cmd /k py "{main_script}" "%1"'
+                command = f'cmd /k "cd .. && py \"{main_script}\" \"%1\""'
                 winreg.SetValueEx(key, None, 0, winreg.REG_SZ, command)
                 print(f"   📝 Created key: HKCU\\{cmd_key_path}")
                 print(f"      ↳ Set default value: {command}")

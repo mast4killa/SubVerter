@@ -69,21 +69,6 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
         print(f"📂 Processing file: {f.name}")
         print("=" * 60 + "\n")
 
-        # Move CWD to parent of the movie directory (or temp dir if already at root)
-        try:
-            movie_dir = f.parent
-            parent_dir = movie_dir.parent
-            if parent_dir != movie_dir:  # not already at filesystem root
-                os.chdir(parent_dir)
-            else:
-                import tempfile
-                os.chdir(tempfile.gettempdir())
-            if verbosity >= 1:
-                print(f"🛈 Changed working directory to: {os.getcwd()}")
-        except Exception as e:
-            if verbosity >= 1:
-                print(f"⚠️ Failed to change working directory: {e}")
-
         if not f.exists():
             print(f"⚠️ Skipping missing file: {f}\n")
             continue
