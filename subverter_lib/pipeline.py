@@ -162,10 +162,12 @@ def run_pipeline(files: Sequence[Path], verbosity: int = 0) -> None:
                     src_lang=src_lang,
                     tgt_lang=cfg["target_language"],
                     llm=llm,
-                    char_limit=cfg.get("char_limit", 2500),
+                    char_limit=cfg.get("max_char_limit", 7500),       # use new max
                     verbosity=verbosity,
                     keep_browser_alive=keep_browser_alive,
-                    summary_max_chars=summary_max_chars
+                    summary_max_chars=summary_max_chars,
+                    movie_folder=f.parent,
+                    min_char_limit=cfg.get("min_char_limit", 400)     # pass through min
                 )
             except Exception as e:
                 print(f"❌ Translation step failed: {e}")

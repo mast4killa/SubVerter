@@ -44,8 +44,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "mkvextract_path": Path("C:/Program Files/MKVToolNix/mkvextract.exe"),
     "mkvmerge_path": Path("C:/Program Files/MKVToolNix/mkvmerge.exe"),
 
-    # Prompt character limit safeguard (applied to constructed prompts before sending).
-    "char_limit": 2500,
+    # Prompt character limit settings:
+    # max_char_limit — upper bound for the subtitle block portion of the prompt.
+    #   This is set to 7500 to leave headroom for instructions, rolling summary,
+    #   and context slices without exceeding the model's safe total (~10 240 chars).
+    #   The actual block size used at runtime should be:
+    #       effective_char_limit = max_char_limit - summary_max_chars
+    #   so the rolling summary never pushes the total over the safe limit.
+    # min_char_limit — smallest block size to try before falling back to per‑subtitle translation.
+    #   Used by progressive fallback logic to shrink blocks on mismatch/refusal before per‑entry mode.
+    "max_char_limit": 4000,
+    "min_char_limit": 400,
 }
 
 
