@@ -114,6 +114,8 @@ def parse_srt(path: Path, verbosity: int = 0) -> List[SRTEntry]:
 
     # Normalize line endings
     raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+    # Strip UTF‑8 BOM if present
+    raw = raw.lstrip("\ufeff")
     blocks = [b for b in raw.split("\n\n") if b.strip()]
 
     if verbosity >= 1:
