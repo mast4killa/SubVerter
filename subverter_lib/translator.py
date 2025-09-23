@@ -163,7 +163,7 @@ class StatusPrinter:
                 total_subs: int = None,
                 base_indent: int = 2,
                 indent_step: int = 2,
-                max_char_limit: int = 4000,
+                max_char_limit: int = 4500,
                 min_char_limit: int = 200,
                 icon_display_width: int = 2):
         self.status_w = status_col_width
@@ -503,7 +503,7 @@ def translate_entries_with_context(
     src_lang: str,
     tgt_lang: str,
     llm: LLMAdapter,
-    char_limit: int,
+    max_char_limit: int,
     verbosity: int = 0,
     keep_browser_alive: bool = False,
     summary_max_chars: int = 500,
@@ -511,7 +511,7 @@ def translate_entries_with_context(
     min_char_limit: int = 400
 ) -> Optional[List[str]]:
     try:
-        effective_char_limit = min(char_limit, 7500) - summary_max_chars
+        effective_char_limit = min(max_char_limit, 4500) - summary_max_chars
         if effective_char_limit < min_char_limit:
             effective_char_limit = min_char_limit
 
@@ -522,7 +522,7 @@ def translate_entries_with_context(
         sp = StatusPrinter(
             status_col_width=24,
             total_subs=len(entries),
-            max_char_limit=char_limit,
+            max_char_limit=max_char_limit,
             min_char_limit=min_char_limit,
             icon_display_width=2  # for emojis in Notepad++
         )

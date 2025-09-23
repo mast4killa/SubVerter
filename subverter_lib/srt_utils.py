@@ -178,13 +178,13 @@ def join_entries_text(entries: List[SRTEntry]) -> str:
     return "\n\n".join(e.text for e in entries)
 
 
-def build_blocks(entries: List[SRTEntry], char_limit: int, verbosity: int = 0) -> List[Tuple[int, int]]:
+def build_blocks(entries: List[SRTEntry], effective_char_limit: int, verbosity: int = 0) -> List[Tuple[int, int]]:
     """
     Build blocks of entries staying under a character limit.
 
     Args:
         entries: List of SRTEntry objects.
-        char_limit: Maximum number of characters per block.
+        effective_char_limit: Effective number of characters per block.
         verbosity: Verbosity level for optional debug output.
 
     Returns:
@@ -199,7 +199,7 @@ def build_blocks(entries: List[SRTEntry], char_limit: int, verbosity: int = 0) -
             # start new block
             start = i
             curr_len = entry_len
-        elif curr_len + entry_len <= char_limit:
+        elif curr_len + entry_len <= effective_char_limit:
             curr_len += entry_len
         else:
             blocks.append((start, i - 1))
@@ -209,7 +209,7 @@ def build_blocks(entries: List[SRTEntry], char_limit: int, verbosity: int = 0) -
         blocks.append((start, len(entries) - 1))
 
     if verbosity >= 1:
-        print(f"   🛈 Built {len(blocks)} blocks from {len(entries)} entries (char_limit={char_limit})")
+        print(f"   🛈 Built {len(blocks)} blocks from {len(entries)} entries (effective_char_limit={effective_char_limit})")
         if verbosity >= 3:
             for bi, (s, e) in enumerate(blocks, start=1):
                 print(f"      ↳ Block {bi}: entries {s+1}–{e+1}")

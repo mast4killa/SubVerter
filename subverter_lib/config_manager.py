@@ -46,14 +46,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # Prompt character limit settings:
     # max_char_limit — upper bound for the subtitle block portion of the prompt.
-    #   This is set to 7500 to leave headroom for instructions, rolling summary,
+    #   This is set to 4500 to leave headroom for instructions, rolling summary,
     #   and context slices without exceeding the model's safe total (~10 240 chars).
     #   The actual block size used at runtime should be:
     #       effective_char_limit = max_char_limit - summary_max_chars
     #   so the rolling summary never pushes the total over the safe limit.
     # min_char_limit — smallest block size to try before falling back to per‑subtitle translation.
     #   Used by progressive fallback logic to shrink blocks on mismatch/refusal before per‑entry mode.
-    "max_char_limit": 4000,
+    "max_char_limit": 4500,
     "min_char_limit": 400,
 }
 
@@ -299,12 +299,12 @@ def validate_config(cfg: dict[str, Any], interactive: bool = True) -> bool:
         print(f"         ✅ summary_max_chars: {summary_chars}")
 
     # --- Char limit check ---
-    char_limit = cfg.get("char_limit", 2500)
-    if not isinstance(char_limit, int) or char_limit < 0:
-        print(f"         ⚠️ Invalid char_limit: {char_limit} (must be positive int)")
+    max_char_limit = cfg.get("max_char_limit", 4500)
+    if not isinstance(max_char_limit, int) or max_char_limit < 0:
+        print(f"         ⚠️ Invalid max_char_limit: {max_char_limit} (must be positive int)")
         ok = False
     else:
-        print(f"         ✅ char_limit: {char_limit}")
+        print(f"         ✅ max_char_limit: {max_char_limit}")
 
     # --- Save only if updated ---
     if interactive:
